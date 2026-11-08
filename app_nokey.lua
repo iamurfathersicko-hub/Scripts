@@ -227,6 +227,7 @@ pcall(function()
     if game.CoreGui:FindFirstChild("lSpGsHPf") then game.CoreGui.lSpGsHPf:Destroy() end
 end)
 local GuiParent = (gethui and gethui()) or game:GetService("CoreGui")
+warn("[APP] GuiParent resolved to: " .. GuiParent:GetFullName() .. " | gethui exists: " .. tostring(gethui ~= nil))
 
 local function New(c, p) local i = Instance.new(c); for k,v in pairs(p or {}) do i[k]=v end; return i end
 local function Tween(o, t, p, s) TS:Create(o, TweenInfo.new(t, s or Enum.EasingStyle.Quart), p):Play() end
@@ -2731,6 +2732,7 @@ New("TextLabel", {Parent=info, BackgroundTransparency=1, Size=UDim2.fromScale(1,
     TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center})
 
 selectTab("Combat")
+warn("[APP] UI build complete. Gui.Parent=" .. tostring(Gui.Parent) .. " Gui.Enabled=" .. tostring(Gui.Enabled) .. " Main visible under: " .. Gui:GetFullName())
 
 -- ========= Toggle menu with custom keybind =========
 UIS.InputBegan:Connect(function(i, gp)
