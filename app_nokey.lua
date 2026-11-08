@@ -260,30 +260,33 @@ local Gui = New("ScreenGui", {Name="tfBfqVxp", Parent=GuiParent, ResetOnSpawn=fa
 local BG_LOCK      = Color3.fromRGB(0, 0, 0)     -- Main / Top / Side / StatusBar
 local BG_LOCK_ROW  = Color3.fromRGB(10, 10, 12)  -- Toggle/Slider/Colorpicker rows (minimal heller fuer Kontrast)
 
--- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut.
--- Was a 10x/sec poll over Gui:GetDescendants() -- a full recursive re-walk of every
--- menu element, forever, for the script's whole lifetime (real cost on a ~2500-line
--- UI tree). Replaced with the same enforcement run once per object via
--- DescendantAdded (catches everything built after this point, which is everything --
--- Main and the rest of the menu are created below this) instead of re-scanning the
--- whole tree on a timer.
-local function enforceBgLock(obj)
-    if not obj:IsA("GuiObject") then return end
-    local accent = obj:GetAttribute("AccentTarget")
-    local locked = obj:GetAttribute("BgLocked")
-    if locked then
-        pcall(function() obj.BackgroundColor3 = BG_LOCK end)
-    elseif not accent then
-        local cur = obj.BackgroundColor3
-        if cur == Color3.fromRGB(14,14,18)
-        or cur == Color3.fromRGB(22,22,28)
-        or cur == Color3.fromRGB(14,14,20) then
-            pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
+-- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut, jeden Frame
+-- Nur AccentTarget-Elemente (Streifen, Glows, Slider-Fill, Section-Bars) duerfen Farbe haben
+task.spawn(function()
+    while true do
+        task.wait(0.1)  -- 10x pro Sekunde, kein spuerbarer perf hit
+        if not Gui or not Gui.Parent then break end
+        for _, obj in ipairs(Gui:GetDescendants()) do
+            if obj:IsA("GuiObject") then
+                local accent = obj:GetAttribute("AccentTarget")
+                local locked = obj:GetAttribute("BgLocked")
+                if locked then
+                    pcall(function() obj.BackgroundColor3 = BG_LOCK end)
+                elseif not accent then
+                    -- Kein AccentTarget -> Background darf NIE eine kraeftige Farbe kriegen
+                    -- Nur rows die BG_LOCK_ROW haben sollen behalten das
+                    local cur = obj.BackgroundColor3
+                    -- Wenn's ein row-artiges dark element ist, lock auf BG_LOCK_ROW
+                    if cur == Color3.fromRGB(14,14,18)
+                    or cur == Color3.fromRGB(22,22,28)
+                    or cur == Color3.fromRGB(14,14,20) then
+                        pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
+                    end
+                end
+            end
         end
     end
-end
-for _, obj in ipairs(Gui:GetDescendants()) do enforceBgLock(obj) end
-Gui.DescendantAdded:Connect(enforceBgLock)
+end)
 
 local Main = New("Frame", {
     Parent = Gui, Size = UDim2.fromOffset(700, 550),
@@ -2301,14 +2304,8 @@ local function isDeadBody(obj)
     return false
 end
 
--- Perf: this was scanning the WHOLE workspace twice a second regardless -- every
--- other full-map scan in this script (item ESP, NPC ESP, aimbot NPC cache) settled
--- on 1-2.5s intervals after the author tuned them; this one was left at 0.5s. Dead
--- bodies also accumulate and never despawn mid-round on a game like Infected Lands,
--- so this scan's cost grows across a match -- matches a "gets laggier over time"
--- symptom specifically. Bumped to 2s to match the sibling features' settled cadence.
 task.spawn(function()
-    while task.wait(2) do
+    while task.wait(0.5) do
         if C.DeadBodyESP then
             local seen = {}
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -3211,15 +3208,13 @@ end
 
 -- NPC cache: workspace scan alle 1s (verhindert lag)
 _G.ZQ_YXNvPrcW = {}
+_G.ZQ_iUKZoNXd = 0
 
--- Perf: this rebuild used to run INSIDE nearest(), which executes every frame while
--- actively aiming. Once every ~1s it did a full Workspace:GetDescendants() scan (the
--- whole map) on the SAME frame as aim-lock math -- that's the lag spike specifically
--- felt when locking onto a player. Moved to its own independent timer, fully
--- decoupled from the aim/render path. nearest() below now only reads the cache.
-task.spawn(function()
-    while true do
-        task.wait(1)
+local function nearest()
+    local best, bd = nil, math.huge
+    -- Refresh NPC list alle 1s (inlined - kein extra local function)
+    if tick() - _G.ZQ_iUKZoNXd > 1 then
+        _G.ZQ_iUKZoNXd = tick()
         _G.ZQ_YXNvPrcW = {}
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("Model") and obj ~= LP.Character and not Players:GetPlayerFromCharacter(obj) then
@@ -3228,10 +3223,6 @@ task.spawn(function()
             end
         end
     end
-end)
-
-local function nearest()
-    local best, bd = nil, math.huge
     -- PLAYERS
     for _, p in ipairs(Players:GetPlayers()) do
         if valid(p) then
@@ -3447,28 +3438,6 @@ end)
 --   WALLHACK ESP
 -- =================================================
 local Cache = {}
-
--- Perf: Name ESP + TeamESP was calling game:GetService("Teams"):GetTeams() and
--- looping it fresh for EVERY visible enemy, EVERY frame, just to look up a team
--- number. Teams practically never change mid-round, so cache the list and only
--- refresh it periodically instead of re-fetching per-player per-frame.
-local teamListCache = {}
-local function refreshTeamCache()
-    teamListCache = game:GetService("Teams"):GetTeams()
-end
-refreshTeamCache()
-task.spawn(function()
-    while true do
-        task.wait(5)
-        refreshTeamCache()
-    end
-end)
-local function getTeamId(team)
-    for i, t in ipairs(teamListCache) do
-        if t == team then return i end
-    end
-    return 0
-end
 
 -- R15 skeleton bone pairs (fallback zu R6 falls parts fehlen)
 local BONES_R15 = {
@@ -4061,40 +4030,15 @@ RunService.RenderStepped:Connect(function()
                 e.tt.Enabled = false
                 if e.ttText then e.ttText.Visible = false end
             end
-            -- Perf: Name/Distance/Health ESP all reuse the same bounds setup that
-            -- Box ESP needs (they're not independent -- Distance/Health position
-            -- themselves off the box's computed top/bottom). That setup block was
-            -- running for every on-screen enemy every frame even when NONE of these
-            -- toggles were on -- e.g. turning on only Name ESP still paid for the
-            -- full box-bounds projection work. Skip the whole block when nothing
-            -- that needs it is actually enabled.
-            local anyEspFeatureOn = C.BoxESP or C.NameESP or C.DistanceESP or C.HealthESP or C.HealthTextESP
-            if rootPos.Z <= 0 or outOfRange or not anyEspFeatureOn then
+            if rootPos.Z <= 0 or outOfRange then
                 e.box.Visible, e.name.Visible, e.dist.Visible = false, false, false
                 e.hpBg.Visible, e.tracer.Visible = false, false
-                if e.hpText then e.hpText.Visible = false end
                 for _, l in ipairs(e.skeleton) do l.Visible = false end
             else
-                -- Perf: getCharBounds does 8x WorldToViewportPoint calls PER PART (every
-                -- BasePart in the rig) to get a pixel-tight box. Running that for every
-                -- visible enemy every frame is the main cost that scales with player
-                -- count (Infected Lands' higher lobbies especially). Fix: only pay for
-                -- the precise per-part scan on enemies close enough that box-tightness
-                -- is actually visible; farther enemies get the cheap 2-point
-                -- head/root approximation (the same math the far-fallback below
-                -- already used, just now the default instead of the exception).
-                -- Fixed distance, not user-exposed -- tune this one number if needed.
-                local BOX_PRECISION_DIST = 150
-                local myRootForBox = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
-                local distForBox = myRootForBox and (myRootForBox.Position - root.Position).Magnitude or math.huge
-                local useTightBox = distForBox <= BOX_PRECISION_DIST
-
-                local onScr, bMinX, bMinY, bMaxX, bMaxY
-                if useTightBox then
-                    onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
-                end
+                -- Echte character-bounds via GetChildren (works R6+R15+custom)
+                local onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
                 local topPos, botPos, w, h, topY
-                if useTightBox and onScr then
+                if onScr then
                     w = bMaxX - bMinX
                     h = bMaxY - bMinY
                     topY  = bMinY
@@ -4122,7 +4066,10 @@ RunService.RenderStepped:Connect(function()
                     e.name.Position   = UDim2.fromOffset(hp.X, hp.Y)
                     local nameStr = p.DisplayName
                     if C.TeamESP and p.Team then
-                        nameStr = "Team #" .. getTeamId(p.Team) .. " | " .. nameStr
+                        local teams = game:GetService("Teams"):GetTeams()
+                        local id = 0
+                        for i, t in ipairs(teams) do if t == p.Team then id = i break end end
+                        nameStr = "Team #" .. id .. " | " .. nameStr
                     end
                     e.name.Text       = nameStr
                     e.name.TextColor3 = color
