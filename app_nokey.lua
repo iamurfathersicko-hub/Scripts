@@ -2735,5 +2735,1184 @@ New("TextLabel", {Parent=info, BackgroundTransparency=1, Size=UDim2.fromScale(1,
     TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center})
 
 selectTab("Combat")
+warn("[APP] UI build complete. Gui.Parent=" .. tostring(Gui.Parent) .. " Gui.Enabled=" .. tostring(Gui.Enabled) .. " Main visible under: " .. Gui:GetFullName())
 
-warn("[HALFTEST] reached line 2737 - full menu built successfully")
+-- ========= Toggle menu with custom keybind =========
+UIS.InputBegan:Connect(function(i, gp)
+    if gp or pickingKeybind then return end
+    if i.KeyCode == C.MenuKey then
+        Main.Visible = not Main.Visible
+    end
+end)
+
+-- ========= MOBILE-FRIENDLY: Floating ENI Toggle Button =========
+-- Kleiner runder Button rechts oben. Klick/Tap = Menu open/close.
+-- Draggable damit User ihn hinschieben koennen wo sie wollen.
+do
+    local ToggleBtn = New("TextButton", {
+        Parent = Gui, Name = "xifbTlDo",
+        Size = UDim2.fromOffset(50, 50),
+        Position = UDim2.new(0, 20, 0, 200),  -- links oben, unter Roblox top bar
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0), BorderSizePixel = 0,
+        Text = "ENI", Font = Enum.Font.GothamBlack, TextSize = 14,
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        AutoButtonColor = false, ZIndex = 100,
+        Active = true, Draggable = false,  -- wir handlen drag manuell fuer touch-support
+    })
+    ToggleBtn:SetAttribute("BgLocked", true)  -- bleibt schwarz beim MenuAccent-change
+    New("UICorner", {Parent = ToggleBtn, CornerRadius = UDim.new(1, 0)})
+    local stroke = New("UIStroke", {Parent = ToggleBtn,
+        Color = Color3.fromRGB(255, 255, 255), Thickness = 1.5, Transparency = 0.3})
+
+    -- Subtle neon-glow
+    local glow = New("Frame", {Parent = ToggleBtn, ZIndex = 99,
+        Size = UDim2.new(1, 10, 1, 10), Position = UDim2.fromOffset(-5, -5),
+        BackgroundColor3 = Color3.fromRGB(255, 255, 255), BorderSizePixel = 0,
+        BackgroundTransparency = 0.85})
+    New("UICorner", {Parent = glow, CornerRadius = UDim.new(1, 0)})
+
+    -- Hover / press feedback
+    ToggleBtn.MouseEnter:Connect(function()
+        Tween(ToggleBtn, 0.15, {BackgroundColor3 = Color3.fromRGB(20, 20, 25)})
+        Tween(stroke, 0.15, {Transparency = 0})
+    end)
+    ToggleBtn.MouseLeave:Connect(function()
+        Tween(ToggleBtn, 0.15, {BackgroundColor3 = Color3.fromRGB(0, 0, 0)})
+        Tween(stroke, 0.15, {Transparency = 0.3})
+    end)
+
+    -- Toggle-Logik: unterscheidet Klick vs Drag (damit Drag nicht toggelt)
+    local dragging = false
+    local moved    = false
+    local dragStart, startPos
+    local DRAG_THRESHOLD = 6  -- px Bewegung bevor's als drag zaehlt (nicht als tap)
+
+    ToggleBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; moved = false
+            dragStart = input.Position
+            startPos  = ToggleBtn.Position
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
+            if math.abs(delta.X) > DRAG_THRESHOLD
+            or math.abs(delta.Y) > DRAG_THRESHOLD then
+                moved = true
+            end
+            if moved then
+                ToggleBtn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + delta.X,
+                    startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+            end
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging and not moved then
+                -- Wirklich ein Tap, kein Drag -> Menu toggle
+                Main.Visible = not Main.Visible
+                -- Kleines press-feedback
+                Tween(ToggleBtn, 0.08, {Size = UDim2.fromOffset(44, 44)})
+                task.delay(0.08, function()
+                    Tween(ToggleBtn, 0.12, {Size = UDim2.fromOffset(50, 50)})
+                end)
+            end
+            dragging = false
+            moved    = false
+        end
+    end)
+end
+
+-- ========= MOBILE AIM-TOGGLE BUTTON - nur auf touch devices =========
+-- Wenn Aimbot in den Settings aktiviert ist erscheint dieser Button rechts.
+-- Tap = Aim ON (lockt), nochmal Tap = OFF (kann wieder frei kucken).
+-- Draggable damit user ihn hinschieben kann wo er moechte.
+if UIS.TouchEnabled and not UIS.KeyboardEnabled then
+    _G.ZQ_XyiqJoAs = false
+
+    local AimBtn = New("TextButton", {
+        Parent = Gui, Name = "tEHRZlAi",
+        Size = UDim2.fromOffset(60, 60),
+        Position = UDim2.new(1, -80, 0.5, -30),  -- rechts, mittig vertikal
+        BackgroundColor3 = Color3.fromRGB(0, 0, 0), BorderSizePixel = 0,
+        Text = "AIM", Font = Enum.Font.GothamBlack, TextSize = 15,
+        TextColor3 = Color3.fromRGB(255, 255, 255),
+        AutoButtonColor = false, ZIndex = 100,
+        Active = true, Draggable = false, Visible = false,  -- nur an wenn Aimbot on
+    })
+    AimBtn:SetAttribute("BgLocked", true)
+    New("UICorner", {Parent = AimBtn, CornerRadius = UDim.new(1, 0)})
+    local aimStroke = New("UIStroke", {Parent = AimBtn,
+        Color = Color3.fromRGB(255, 255, 255), Thickness = 2, Transparency = 0.3})
+
+    -- Watchdog: zeigt/versteckt Button je nach C.AimEnabled
+    task.spawn(function()
+        while AimBtn.Parent do
+            task.wait(0.2)
+            if C.AimEnabled and not AimBtn.Visible then
+                AimBtn.Visible = true
+            elseif not C.AimEnabled and AimBtn.Visible then
+                AimBtn.Visible = false
+                _G.ZQ_XyiqJoAs = false  -- reset wenn aim disabled wird
+            end
+        end
+    end)
+
+    -- Drag-vs-tap logic (same as ENI menu button)
+    local dragging = false
+    local moved    = false
+    local dragStart, startPos
+    local DRAG_TH  = 6
+
+    AimBtn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true; moved = false
+            dragStart = input.Position
+            startPos  = AimBtn.Position
+        end
+    end)
+
+    UIS.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            local d = input.Position - dragStart
+            if math.abs(d.X) > DRAG_TH or math.abs(d.Y) > DRAG_TH then
+                moved = true
+            end
+            if moved then
+                AimBtn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            end
+        end
+    end)
+
+    UIS.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging and not moved then
+                -- Tap -> toggle aim
+                _G.ZQ_XyiqJoAs = not _G.ZQ_XyiqJoAs
+                if _G.ZQ_XyiqJoAs then
+                    -- ON: rot leuchten + press feedback
+                    AimBtn.BackgroundColor3 = Color3.fromRGB(180, 30, 45)
+                    aimStroke.Color         = Color3.fromRGB(255, 80, 100)
+                    aimStroke.Transparency  = 0
+                    AimBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+                else
+                    -- OFF: schwarz
+                    AimBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                    aimStroke.Color         = Color3.fromRGB(255, 255, 255)
+                    aimStroke.Transparency  = 0.3
+                end
+                -- press-feedback bounce
+                Tween(AimBtn, 0.08, {Size = UDim2.fromOffset(54, 54)})
+                task.delay(0.08, function()
+                    Tween(AimBtn, 0.12, {Size = UDim2.fromOffset(60, 60)})
+                end)
+            end
+            dragging = false; moved = false
+        end
+    end)
+end
+
+-- ========= ESP PREVIEW PANEL (halbe Breite, volle Menu-Hoehe) =========
+local Preview = New("Frame", {Parent=Gui, Size=UDim2.fromOffset(310, 550),
+    Position=UDim2.new(0.5, 350, 0.5, -275), BackgroundColor3=Color3.fromRGB(22,22,28),
+    BorderSizePixel=0, Visible=false})
+New("UICorner", {Parent=Preview, CornerRadius=UDim.new(0,12)})
+New("UIStroke", {Parent=Preview, Color=Color3.fromRGB(38,38,52), Thickness=1, Transparency=0.2})
+-- Header
+local pHeader = New("Frame", {Parent=Preview, Size=UDim2.new(1,0,0,32),
+    BackgroundColor3=Color3.fromRGB(14,14,18), BorderSizePixel=0})
+New("UICorner", {Parent=pHeader, CornerRadius=UDim.new(0,12)})
+New("Frame", {Parent=pHeader, Size=UDim2.new(1,0,0,12), Position=UDim2.new(0,0,1,-12),
+    BackgroundColor3=Color3.fromRGB(16,16,22), BorderSizePixel=0})
+New("TextLabel", {Parent=pHeader, BackgroundTransparency=1,
+    Position=UDim2.fromOffset(14,0), Size=UDim2.new(1,-14,1,0),
+    Font=Enum.Font.GothamBold, TextSize=12, Text="ESP PREVIEW",
+    TextColor3=Color3.fromRGB(240,240,245), TextXAlignment=Enum.TextXAlignment.Left})
+-- Preview canvas
+local Canvas = New("Frame", {Parent=Preview, Size=UDim2.new(1,-20,1,-42),
+    Position=UDim2.fromOffset(10,38), BackgroundColor3=Color3.fromRGB(30,45,35),
+    BorderSizePixel=0, ClipsDescendants=true})
+New("UICorner", {Parent=Canvas, CornerRadius=UDim.new(0,8)})
+-- Grid pattern background
+for i=1,10 do
+    New("Frame", {Parent=Canvas, Size=UDim2.new(1,0,0,1), BorderSizePixel=0,
+        Position=UDim2.new(0,0,i/10,0), BackgroundColor3=Color3.fromRGB(40,55,45), BackgroundTransparency=0.3})
+end
+
+-- Bacon Character built from Frames - clean R15-style body
+-- Farben: gelbe Haut, orange bacon hair, blaues Shirt, gruene Hose
+local bodyColor = Color3.fromRGB(255, 230, 100)  -- yellow bacon skin
+local shirtColor = Color3.fromRGB(80, 130, 200)
+local pantsColor = Color3.fromRGB(70, 160, 90)
+
+local baconParts = {}  -- store parts for chams color swap
+-- Head (with bacon hair strip on top)
+local head = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0.5,0),
+    Position=UDim2.new(0.5,0,0.15,0), Size=UDim2.fromOffset(60,55),
+    BackgroundColor3=bodyColor, BorderSizePixel=0})
+New("UICorner", {Parent=head, CornerRadius=UDim.new(0,2)})
+table.insert(baconParts, {frame=head, orig=bodyColor})
+-- Face dots (eyes)
+New("Frame", {Parent=head, Position=UDim2.fromOffset(14,22), Size=UDim2.fromOffset(6,8),
+    BackgroundColor3=Color3.fromRGB(14,14,18), BorderSizePixel=0})
+New("Frame", {Parent=head, Position=UDim2.fromOffset(40,22), Size=UDim2.fromOffset(6,8),
+    BackgroundColor3=Color3.fromRGB(14,14,18), BorderSizePixel=0})
+-- Smile
+New("Frame", {Parent=head, Position=UDim2.fromOffset(18,40), Size=UDim2.fromOffset(24,3),
+    BackgroundColor3=Color3.fromRGB(14,14,18), BorderSizePixel=0})
+-- Bacon hair (orange strip on top)
+local hair = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0.5,1),
+    Position=UDim2.new(0.5,0,0.15,3), Size=UDim2.fromOffset(66,10),
+    BackgroundColor3=Color3.fromRGB(255,140,50), BorderSizePixel=0})
+New("UICorner", {Parent=hair, CornerRadius=UDim.new(0,4)})
+table.insert(baconParts, {frame=hair, orig=Color3.fromRGB(255,140,50)})
+
+-- Torso (blaues shirt)
+local torso = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0.5,0),
+    Position=UDim2.new(0.5,0,0.15,60), Size=UDim2.fromOffset(90,110),
+    BackgroundColor3=shirtColor, BorderSizePixel=0})
+New("UICorner", {Parent=torso, CornerRadius=UDim.new(0,2)})
+table.insert(baconParts, {frame=torso, orig=shirtColor})
+
+-- Arms
+local armL = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(1,0),
+    Position=UDim2.new(0.5,-46,0.15,60), Size=UDim2.fromOffset(28,100),
+    BackgroundColor3=bodyColor, BorderSizePixel=0})
+New("UICorner", {Parent=armL, CornerRadius=UDim.new(0,4)})
+table.insert(baconParts, {frame=armL, orig=bodyColor})
+local armR = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0,0),
+    Position=UDim2.new(0.5,46,0.15,60), Size=UDim2.fromOffset(28,100),
+    BackgroundColor3=bodyColor, BorderSizePixel=0})
+New("UICorner", {Parent=armR, CornerRadius=UDim.new(0,4)})
+table.insert(baconParts, {frame=armR, orig=bodyColor})
+
+-- Legs (gruene Hose)
+local legL = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(1,0),
+    Position=UDim2.new(0.5,-2,0.15,170), Size=UDim2.fromOffset(40,100),
+    BackgroundColor3=pantsColor, BorderSizePixel=0})
+New("UICorner", {Parent=legL, CornerRadius=UDim.new(0,4)})
+table.insert(baconParts, {frame=legL, orig=pantsColor})
+local legR = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0,0),
+    Position=UDim2.new(0.5,2,0.15,170), Size=UDim2.fromOffset(40,100),
+    BackgroundColor3=pantsColor, BorderSizePixel=0})
+New("UICorner", {Parent=legR, CornerRadius=UDim.new(0,4)})
+table.insert(baconParts, {frame=legR, orig=pantsColor})
+
+-- Char center ist bei ~0.5x, ~0.5y - box umschliesst body
+local pBox = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0.5,0),
+    Position=UDim2.new(0.5,0,0.15,-6), Size=UDim2.fromOffset(115,285),
+    BackgroundTransparency=1, BorderSizePixel=0, ZIndex=3})
+local pBoxStroke = New("UIStroke", {Parent=pBox, Thickness=2})
+local pName = New("TextLabel", {Parent=Canvas, BackgroundTransparency=1,
+    AnchorPoint=Vector2.new(0.5,1), Position=UDim2.new(0.5,0,0.15,-16),
+    Size=UDim2.fromOffset(160,18), Font=Enum.Font.GothamBold, TextSize=13,
+    Text="Builderman", TextStrokeTransparency=0, ZIndex=3})
+local pDist = New("TextLabel", {Parent=Canvas, BackgroundTransparency=1,
+    AnchorPoint=Vector2.new(0.5,0), Position=UDim2.new(0.5,0,0.15,285),
+    Size=UDim2.fromOffset(80,16), Font=Enum.Font.Gotham, TextSize=11,
+    Text="[42 m]", TextColor3=Color3.fromRGB(200,200,200),
+    TextStrokeTransparency=0, ZIndex=3})
+local pHpBg = New("Frame", {Parent=Canvas, BackgroundColor3=Color3.fromRGB(22,22,28),
+    AnchorPoint=Vector2.new(1,0), Position=UDim2.new(0.5,-64,0.15,-6),
+    Size=UDim2.fromOffset(4,285), BorderSizePixel=0, ZIndex=3})
+local pHpFg = New("Frame", {Parent=pHpBg, AnchorPoint=Vector2.new(0,1),
+    Position=UDim2.fromScale(0,1), Size=UDim2.new(1,0,0.7,0),
+    BackgroundColor3=Color3.fromRGB(60,200,60), BorderSizePixel=0})
+local pTracer = New("Frame", {Parent=Canvas, AnchorPoint=Vector2.new(0.5,1),
+    Position=UDim2.new(0.5,0,1,0), Size=UDim2.fromOffset(2,180),
+    BorderSizePixel=0, ZIndex=2})
+
+-- Skeleton preview lines (hardcoded R15-like positions)
+-- Each entry: {startX, startY, endX, endY} relative to canvas
+local pSkelPositions = {
+    {0,0,   0,55},      -- head -> torso top
+    {0,55,  0,170},     -- torso spine
+    {0,60,  -46,60},    -- torso -> left shoulder
+    {-46,60, -46,110},  -- left arm upper
+    {-46,110,-46,160},  -- left arm lower
+    {0,60,  46,60},     -- torso -> right shoulder
+    {46,60, 46,110},    -- right arm upper
+    {46,110,46,160},    -- right arm lower
+    {0,170, -20,220},   -- torso -> left hip
+    {-20,220,-20,270},  -- left leg
+    {0,170, 20,220},    -- torso -> right hip
+    {20,220,20,270},    -- right leg
+}
+local pSkel = {}
+for i, pos in ipairs(pSkelPositions) do
+    local dx = pos[3] - pos[1]
+    local dy = pos[4] - pos[2]
+    local len = math.sqrt(dx*dx + dy*dy)
+    local ang = math.deg(math.atan2(dx, -dy))
+    local ln = New("Frame", {Parent=Canvas, BackgroundColor3=Color3.new(1,1,1),
+        BorderSizePixel=0, Visible=false, AnchorPoint=Vector2.new(0.5,0),
+        Position=UDim2.new(0.5,pos[1],0.15,pos[2]),
+        Size=UDim2.fromOffset(2,len), Rotation=ang, ZIndex=4})
+    pSkel[i] = ln
+end
+
+-- Live update preview
+RunService.RenderStepped:Connect(function()
+    if not Preview or not Preview.Parent or not Preview.Visible then return end
+    local col = C.ESPColor
+    pBox.Visible    = C.BoxESP;    pBoxStroke.Color = col
+    pName.Visible   = C.NameESP;   pName.TextColor3 = col
+    pDist.Visible   = C.DistanceESP
+    pHpBg.Visible   = C.HealthESP
+    pTracer.Visible = C.TracerESP; pTracer.BackgroundColor3 = col
+    -- Chams: respect ChamsMode inkl. Rainbow
+    if C.ChamsEnabled then
+        local chamsCol = col
+        if C.ChamsMode == "Rainbow" then
+            local hue = (tick() * 0.3) % 1
+            chamsCol = Color3.fromHSV(hue, 1, 1)
+        end
+        for _, p in ipairs(baconParts) do
+            p.frame.BackgroundColor3 = chamsCol
+            p.frame.BackgroundTransparency = C.ChamsFill or 0
+        end
+    else
+        for _, p in ipairs(baconParts) do
+            p.frame.BackgroundColor3 = p.orig
+            p.frame.BackgroundTransparency = 0
+        end
+    end
+    -- Skeleton
+    if C.SkeletonESP then
+        for _, l in ipairs(pSkel) do
+            l.Visible = true
+            l.BackgroundColor3 = col
+        end
+    else
+        for _, l in ipairs(pSkel) do l.Visible = false end
+    end
+end)
+
+-- Preview follows Main + tab-based show/hide
+local function syncPreviewPosition()
+    Preview.Position = UDim2.new(
+        Main.Position.X.Scale, Main.Position.X.Offset + Main.AbsoluteSize.X + 38,
+        Main.Position.Y.Scale, Main.Position.Y.Offset)
+end
+Main:GetPropertyChangedSignal("Position"):Connect(syncPreviewPosition)
+Main:GetPropertyChangedSignal("AbsoluteSize"):Connect(syncPreviewPosition)
+-- Preview hides when menu hides
+Main:GetPropertyChangedSignal("Visible"):Connect(function()
+    if not Main.Visible then
+        Preview.Visible = false
+    elseif currentTab == "Visuals" then
+        Preview.Visible = true
+    end
+end)
+
+local origSelectTab = selectTab
+selectTab = function(name)
+    origSelectTab(name)
+    Preview.Visible = (name == "Visuals")
+    syncPreviewPosition()
+end
+CloseBtn.MouseButton1Click:Connect(function() Preview:Destroy() end)
+
+-- Apply loaded MenuAccent (from saved config)
+task.spawn(function()
+    task.wait(1)  -- wait for UI to fully build
+    if INITIAL_MENU_ACCENT and typeof(updateMenuAccent) == "function" then
+        C.MenuAccent = Color3.fromRGB(240,240,245)  -- reset to default first so walk finds elements
+        updateMenuAccent(INITIAL_MENU_ACCENT)
+    end
+end)
+
+-- Entrance animation
+Main.Size = UDim2.fromOffset(700, 0)
+Tween(Main, 0.5, {Size = UDim2.fromOffset(700, 550)}, Enum.EasingStyle.Back)
+
+-- Menu Size via UIScale (clean, skaliert alle children automatisch)
+local menuScale = Instance.new("UIScale")
+menuScale.Scale = 1
+menuScale.Parent = Main
+
+-- Transparency: track original werte einmal, dann live apply
+local origTrans = {}
+task.spawn(function()
+    task.wait(0.7)  -- wait for entrance animation + all UI setup
+    for _, obj in ipairs(Main:GetDescendants()) do
+        origTrans[obj] = {
+            bg   = obj:IsA("GuiObject") and obj.BackgroundTransparency or nil,
+            text = (obj:IsA("TextLabel") or obj:IsA("TextButton") or obj:IsA("TextBox"))
+                    and obj.TextTransparency or nil,
+        }
+    end
+    origTrans[Main] = {bg = Main.BackgroundTransparency}
+
+    while Main.Parent do
+        task.wait(0.1)
+        menuScale.Scale = C.MenuSize or 1
+        local t = C.MenuTransparency or 0
+        for obj, orig in pairs(origTrans) do
+            if obj.Parent then
+                if orig.bg and orig.bg < 1 then
+                    pcall(function() obj.BackgroundTransparency = math.min(1, orig.bg + t) end)
+                end
+                if orig.text then
+                    pcall(function() obj.TextTransparency = math.min(1, orig.text + t) end)
+                end
+            end
+        end
+    end
+end)
+
+-- =================================================
+--   FOV CIRCLE (Frame-based)
+-- =================================================
+RunService.RenderStepped:Connect(function()
+    FOVFrame.Visible = C.FOVEnabled
+    FOVFrame.Size    = UDim2.fromOffset(C.FOVRadius * 2, C.FOVRadius * 2)
+    FOVStroke.Color  = C.FOVColor
+end)
+
+-- =================================================
+--   AIMBOT
+-- =================================================
+local function valid(p)
+    if p == LP or not p.Character then return false end
+    local h = p.Character:FindFirstChildOfClass("Humanoid")
+    -- AimPart mit Fallbacks: Head -> HumanoidRootPart -> Torso (R6) -> UpperTorso (R15)
+    local part = p.Character:FindFirstChild(C.AimPart)
+                or p.Character:FindFirstChild("Head")
+                or p.Character:FindFirstChild("HumanoidRootPart")
+                or p.Character:FindFirstChild("Torso")
+                or p.Character:FindFirstChild("UpperTorso")
+    if not h or h.Health <= 0 or not part then return false end
+    if C.TeamCheck and p.Team ~= nil and p.Team == LP.Team then return false end
+    if C.WallCheck then
+        local o = Camera.CFrame.Position
+        local rp = RaycastParams.new()
+        rp.FilterDescendantsInstances = {LP.Character, Camera}
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = Workspace:Raycast(o, part.Position - o, rp)
+        if hit and not hit.Instance:IsDescendantOf(p.Character) then return false end
+    end
+    return true
+end
+
+-- NPC cache: workspace scan alle 1s (verhindert lag)
+_G.ZQ_YXNvPrcW = {}
+
+-- Perf: this rebuild used to run INSIDE nearest(), which executes every frame while
+-- actively aiming. Once every ~1s it did a full Workspace:GetDescendants() scan (the
+-- whole map) on the SAME frame as aim-lock math -- that's the lag spike specifically
+-- felt when locking onto a player. Moved to its own independent timer, fully
+-- decoupled from the aim/render path. nearest() below now only reads the cache.
+task.spawn(function()
+    while true do
+        task.wait(1)
+        _G.ZQ_YXNvPrcW = {}
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj ~= LP.Character and not Players:GetPlayerFromCharacter(obj) then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                if hum then table.insert(_G.ZQ_YXNvPrcW, obj) end
+            end
+        end
+    end
+end)
+
+local function nearest()
+    local best, bd = nil, math.huge
+    -- PLAYERS
+    for _, p in ipairs(Players:GetPlayers()) do
+        if valid(p) then
+            local part = p.Character:FindFirstChild(C.AimPart)
+                      or p.Character:FindFirstChild("Head")
+                      or p.Character:FindFirstChild("HumanoidRootPart")
+                      or p.Character:FindFirstChild("Torso")
+                      or p.Character:FindFirstChild("UpperTorso")
+            local sp, on = Camera:WorldToViewportPoint(part.Position)
+            if on then
+                local dx = sp.X - Camera.ViewportSize.X/2
+                local dy = sp.Y - Camera.ViewportSize.Y/2
+                local d = math.sqrt(dx*dx+dy*dy)
+                if d < C.FOVRadius and d < bd then best, bd = p, d end
+            end
+        end
+    end
+    -- NPCs aus cache (kein workspace-scan pro frame)
+    for i = #_G.ZQ_YXNvPrcW, 1, -1 do
+        local obj = _G.ZQ_YXNvPrcW[i]
+        if not obj or not obj.Parent then
+            table.remove(_G.ZQ_YXNvPrcW, i)
+        else
+            local hum = obj:FindFirstChildOfClass("Humanoid")
+            local part = obj:FindFirstChild(C.AimPart) or obj:FindFirstChild("Head") or obj:FindFirstChild("HumanoidRootPart")
+            if hum and part and hum.Health > 0 then
+                local sp, on = Camera:WorldToViewportPoint(part.Position)
+                if on then
+                    local dx = sp.X - Camera.ViewportSize.X/2
+                    local dy = sp.Y - Camera.ViewportSize.Y/2
+                    local d = math.sqrt(dx*dx+dy*dy)
+                    if d < C.FOVRadius and d < bd then
+                        -- Wall check für NPCs
+                        local passWallCheck = true
+                        if C.WallCheck then
+                            local o = Camera.CFrame.Position
+                            local rp = RaycastParams.new()
+                            rp.FilterDescendantsInstances = {LP.Character, Camera}
+                            rp.FilterType = Enum.RaycastFilterType.Exclude
+                            local hit = Workspace:Raycast(o, part.Position - o, rp)
+                            if hit and not hit.Instance:IsDescendantOf(obj) then passWallCheck = false end
+                        end
+                        if passWallCheck then
+                            best, bd = {Character=obj, Name=obj.Name, DisplayName=obj.Name, isNPC=true}, d
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+-- Aimbot mit STICKY-Target - behaelt Enemy 0.5s trotz brief-invalid state
+local stickyTarget = nil
+local stickyTime   = 0
+RunService.RenderStepped:Connect(function()
+    if not C.AimEnabled then stickyTarget = nil; return end
+    local isAiming = false
+    -- MOBILE-support: der floating aim button setzt _G.ZQ_XyiqJoAs
+    -- Wenn mobile + button active -> aim ist an, egal was AimMode sagt
+    if _G.ZQ_XyiqJoAs then
+        isAiming = true
+    elseif C.AimMode == "AlwaysOn" then
+        isAiming = true
+    elseif C.AimMode == "RightMouse" then
+        isAiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    elseif C.AimMode == "LeftMouse" then
+        isAiming = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+    elseif C.AimMode == "KeyE" then
+        isAiming = UIS:IsKeyDown(Enum.KeyCode.E)
+    end
+    _G.ZQ_eVBTQlkm = isAiming  -- global flag fuer AutoShot
+    if not isAiming then stickyTarget = nil; _G.ZQ_xlCTfPwE = nil; return end
+    local t = nearest()
+    -- Sticky: wenn kein neuer target aber alter ist noch alive -> weiter aim
+    if t then
+        stickyTarget = t
+        stickyTime = tick()
+    elseif stickyTarget and (tick() - stickyTime) < 0.5 then
+        -- 0.5s sticky window: use last known target if still alive
+        if stickyTarget.Character
+           and stickyTarget.Character:FindFirstChildOfClass("Humanoid")
+           and stickyTarget.Character:FindFirstChildOfClass("Humanoid").Health > 0 then
+            t = stickyTarget
+        else
+            stickyTarget = nil; return
+        end
+    else
+        stickyTarget = nil; return
+    end
+    local part = t.Character:FindFirstChild(C.AimPart)
+              or t.Character:FindFirstChild("Head")
+              or t.Character:FindFirstChild("HumanoidRootPart")
+              or t.Character:FindFirstChild("Torso")
+    if not part then return end
+    _G.ZQ_xlCTfPwE = t  -- Aimbot lockt aktiv auf diesen Player -> AutoShot darf feuern
+    local cf = CFrame.new(Camera.CFrame.Position, part.Position)
+    -- MOBILE-fix: NIE instant-snappen (fightet mit touch-camera -> wildes swingen)
+    -- Auch die Smoothness weicher machen auf mobile damit keine oscillation entsteht
+    local isMobile = UIS.TouchEnabled and not UIS.KeyboardEnabled
+    if isMobile then
+        -- Always smooth lerp, never snap. Extra smoothness um touch-drift zu absorbieren
+        local smooth = math.clamp(1 - math.max(C.AimSmoothness, 0.35), 0.05, 0.7)
+        Camera.CFrame = Camera.CFrame:Lerp(cf, smooth)
+    else
+        -- Desktop: snap hart wenn LMB gedrueckt (fuer auto-guns mit recoil)
+        local firing = UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+        if firing then
+            Camera.CFrame = cf
+        else
+            Camera.CFrame = Camera.CFrame:Lerp(cf, math.clamp(1 - C.AimSmoothness, 0.1, 1))
+        end
+    end
+end)
+
+-- ========= HIT SOUND - nur LMB + Camera-Raycast (nur DEINE Hits) =========
+-- HP-change Detektor wurde entfernt weil er auch bei fremden hits gefeuert hat
+
+-- Method 2: LMB + Camera-Raycast (nur wenn Crosshair auf Enemy = echter Hit)
+local lastShotTime = 0
+UIS.InputBegan:Connect(function(input, _gp)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and C.HitSound then
+        if tick() - lastShotTime < 0.1 then return end
+        -- GATE: nur wenn eine Waffe (Tool oder equipped Handle) da ist
+        local char = LP.Character
+        if not char then return end
+        local hasWeapon = char:FindFirstChildWhichIsA("Tool") ~= nil
+        if not hasWeapon then
+            -- Fallback: check for equipped Handle (Tools mit Handle sind equipped)
+            for _, c in ipairs(char:GetChildren()) do
+                if c:IsA("Model") or c.Name == "Handle" or c:FindFirstChild("Handle") then
+                    hasWeapon = true; break
+                end
+            end
+        end
+        if not hasWeapon then return end
+        -- Raycast von Camera forward
+        local origin = Camera.CFrame.Position
+        local dir    = Camera.CFrame.LookVector * 500
+        local rp = RaycastParams.new()
+        rp.FilterDescendantsInstances = {LP.Character, Camera}
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = Workspace:Raycast(origin, dir, rp)
+        if not hit then return end
+        -- Ist das ein Player?
+        local model = hit.Instance:FindFirstAncestorOfClass("Model")
+        local plr   = model and Players:GetPlayerFromCharacter(model)
+        if plr and plr ~= LP then
+            lastShotTime = tick()
+            task.spawn(playHitSound)
+        end
+    end
+end)
+
+-- ========= AUTO SHOT (nur wenn Aimbot AKTIV lockt) =========
+local VIM_AutoShot = game:GetService("VirtualInputManager")
+task.spawn(function()
+    while true do
+        task.wait((C.AutoShotDelay or 100) / 1000)
+        if not C.AutoShot then continue end
+        -- GATE: Aimbot muss aktiv sein UND auf jemanden gelockt haben
+        if not C.AimEnabled then continue end
+        if not _G.ZQ_eVBTQlkm then continue end
+        local target = _G.ZQ_xlCTfPwE
+        if not target then continue end
+        -- Target noch alive?
+        local tChar = target.Character
+        local tHum  = tChar and tChar:FindFirstChildOfClass("Humanoid")
+        if not tHum or tHum.Health <= 0 then continue end
+
+        -- FIRE: mehrere Wege parallel fuer max Kompatibilitaet
+        -- 1) Wave-native mouse1press/release (bester Weg, umgeht Fokus-Check)
+        pcall(function()
+            if mouse1press then mouse1press() end
+            task.wait(0.02)
+            if mouse1release then mouse1release() end
+        end)
+        -- 2) Fallback mouse1click
+        pcall(function() if mouse1click then mouse1click() end end)
+        -- 3) VIM mit ECHTER Mausposition (nicht 0,0 - das blockt Roblox oft)
+        pcall(function()
+            local mp  = UIS:GetMouseLocation()
+            local mx, my = mp.X, mp.Y
+            VIM_AutoShot:SendMouseButtonEvent(mx, my, 0, true,  game, 0)
+            task.wait(0.02)
+            VIM_AutoShot:SendMouseButtonEvent(mx, my, 0, false, game, 0)
+        end)
+        -- 4) Tool activation (client + server RemoteEvent falls vorhanden)
+        local tool = LP.Character and LP.Character:FindFirstChildOfClass("Tool")
+        if tool then
+            pcall(function() tool:Activate() end)
+            -- Manche Games nutzen RemoteEvent im Tool statt Activate
+            for _, remote in ipairs(tool:GetDescendants()) do
+                if remote:IsA("RemoteEvent") then
+                    local rn = remote.Name:lower()
+                    if rn:find("shoot") or rn:find("fire") or rn:find("shot")
+                    or rn:find("attack") or rn:find("swing") then
+                        pcall(function()
+                            local mouseHit = LP:GetMouse().Hit
+                            remote:FireServer(mouseHit and mouseHit.Position or Camera.CFrame.Position)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+
+
+-- =================================================
+--   WALLHACK ESP
+-- =================================================
+local Cache = {}
+
+-- Perf: Name ESP + TeamESP was calling game:GetService("Teams"):GetTeams() and
+-- looping it fresh for EVERY visible enemy, EVERY frame, just to look up a team
+-- number. Teams practically never change mid-round, so cache the list and only
+-- refresh it periodically instead of re-fetching per-player per-frame.
+local teamListCache = {}
+local function refreshTeamCache()
+    teamListCache = game:GetService("Teams"):GetTeams()
+end
+refreshTeamCache()
+task.spawn(function()
+    while true do
+        task.wait(5)
+        refreshTeamCache()
+    end
+end)
+local function getTeamId(team)
+    for i, t in ipairs(teamListCache) do
+        if t == team then return i end
+    end
+    return 0
+end
+
+-- R15 skeleton bone pairs (fallback zu R6 falls parts fehlen)
+local BONES_R15 = {
+    {"Head","UpperTorso"}, {"UpperTorso","LowerTorso"},
+    {"UpperTorso","LeftUpperArm"}, {"LeftUpperArm","LeftLowerArm"}, {"LeftLowerArm","LeftHand"},
+    {"UpperTorso","RightUpperArm"}, {"RightUpperArm","RightLowerArm"}, {"RightLowerArm","RightHand"},
+    {"LowerTorso","LeftUpperLeg"}, {"LeftUpperLeg","LeftLowerLeg"}, {"LeftLowerLeg","LeftFoot"},
+    {"LowerTorso","RightUpperLeg"}, {"RightUpperLeg","RightLowerLeg"}, {"RightLowerLeg","RightFoot"},
+}
+local BONES_R6 = {
+    {"Head","Torso"},
+    {"Torso","Left Arm"}, {"Torso","Right Arm"},
+    {"Torso","Left Leg"}, {"Torso","Right Leg"},
+}
+local BONES = BONES_R15  -- Default, wird pro character auto-detected
+-- Get proper bone set for character rig type
+local function getBones(char)
+    if char:FindFirstChild("UpperTorso") then return BONES_R15 end
+    if char:FindFirstChild("Torso")      then return BONES_R6  end
+    return BONES_R15
+end
+-- Get screen bounds - nur sichtbare Body-Parts (skip invisible/marker parts)
+local function getCharBounds(char)
+    local minX, minY = math.huge, math.huge
+    local maxX, maxY = -math.huge, -math.huge
+    local anyOnScreen = false
+    for _, part in ipairs(char:GetChildren()) do
+        if part:IsA("BasePart") and part.Transparency < 1 then
+            local pos = part.Position
+            -- 8 corners of THIS part
+            local hx, hy, hz = part.Size.X/2, part.Size.Y/2, part.Size.Z/2
+            for dx = -1, 1, 2 do for dy = -1, 1, 2 do for dz = -1, 1, 2 do
+                local corner = pos + Vector3.new(hx*dx, hy*dy, hz*dz)
+                local sp = Camera:WorldToViewportPoint(corner)
+                if sp.Z > 0 then
+                    anyOnScreen = true
+                    if sp.X < minX then minX = sp.X end
+                    if sp.Y < minY then minY = sp.Y end
+                    if sp.X > maxX then maxX = sp.X end
+                    if sp.Y > maxY then maxY = sp.Y end
+                end
+            end end end
+        end
+    end
+    return anyOnScreen, minX, minY, maxX, maxY
+end
+
+local function makeESP(p)
+    local box = New("Frame", {Parent = ESPGui, BackgroundTransparency = 1,
+        BorderSizePixel = 0, Visible = false, AnchorPoint = Vector2.new(0.5, 0)})
+    local boxStroke = New("UIStroke", {Parent = box, Color = C.ESPColor, Thickness = 1.5})
+
+    local name = New("TextLabel", {Parent = ESPGui, BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold, TextSize = 13, TextColor3 = C.ESPColor, Visible = false,
+        AnchorPoint = Vector2.new(0.5, 1), Size = UDim2.fromOffset(200, 16),
+        TextStrokeTransparency = 0, TextStrokeColor3 = Color3.new(0,0,0)})
+
+    local dist = New("TextLabel", {Parent = ESPGui, BackgroundTransparency = 1,
+        Font = Enum.Font.Gotham, TextSize = 11, TextColor3 = Color3.fromRGB(200,200,200),
+        Visible = false, AnchorPoint = Vector2.new(0.5, 0), Size = UDim2.fromOffset(120, 14),
+        TextStrokeTransparency = 0, TextStrokeColor3 = Color3.new(0,0,0)})
+
+    local hpText = New("TextLabel", {Parent = ESPGui, BackgroundTransparency = 1,
+        Font = Enum.Font.GothamBold, TextSize = 9, TextColor3 = Color3.fromRGB(60,200,60),
+        Visible = false, AnchorPoint = Vector2.new(1, 0.5),
+        Size = UDim2.fromOffset(30, 10),
+        TextStrokeTransparency = 0, TextStrokeColor3 = Color3.new(0,0,0),
+        TextXAlignment = Enum.TextXAlignment.Right})
+    local hpBg = New("Frame", {Parent = ESPGui, BackgroundColor3 = Color3.fromRGB(22,22,28),
+        BorderSizePixel = 0, Visible = false})
+    local hpFg = New("Frame", {Parent = hpBg, BorderSizePixel = 0,
+        AnchorPoint = Vector2.new(0, 1), Position = UDim2.fromScale(0, 1),
+        Size = UDim2.fromScale(1, 1)})
+
+    local tracer = New("Frame", {Parent = ESPGui, BackgroundColor3 = C.ESPColor,
+        BorderSizePixel = 0, Visible = false, AnchorPoint = Vector2.new(0.5, 1),
+        Size = UDim2.fromOffset(2, 200), ZIndex = 3})
+
+    -- Skeleton lines (clean thick, joints touch via anchor)
+    local skeleton = {}
+    for i = 1, #BONES do
+        local line = New("Frame", {Parent = ESPGui, BackgroundColor3 = C.ESPColor,
+            BorderSizePixel = 0, Visible = false, AnchorPoint = Vector2.new(0.5, 0),
+            Size = UDim2.fromOffset(3, 10)})
+        skeleton[i] = line
+    end
+
+    -- Chams - Roblox Highlight (durch Waende sichtbar)
+    local highlight = New("Highlight", {
+        Parent = ESPGui, Enabled = false,
+        FillColor = C.ESPColor, OutlineColor = C.ESPColor,
+        FillTransparency = 0.5, OutlineTransparency = 0,
+        DepthMode = Enum.HighlightDepthMode.AlwaysOnTop,
+    })
+
+    -- Tung Tung Sahur - echter Roblox Decal mit fallback zur drawn version
+    local tt = New("BillboardGui", {Parent = ESPGui, Enabled = false,
+        Size = UDim2.new(4, 0, 5.4, 0), StudsOffset = Vector3.new(0, 0.5, 0),
+        AlwaysOnTop = true, LightInfluence = 0})
+    local ttText = New("TextLabel", {Parent = tt, Size = UDim2.fromScale(1,1),
+        BackgroundTransparency = 1, Text = "🌴🥁🌴",
+        Font = Enum.Font.GothamBlack, TextScaled = true,
+        TextColor3 = Color3.fromRGB(255, 220, 100),
+        TextStrokeTransparency = 0, TextStrokeColor3 = Color3.new(0,0,0)})
+    local ttImage = New("ImageLabel", {Parent = tt, Size = UDim2.fromScale(1,1),
+        BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+        Image = "rbxassetid://91587263817266"})
+    -- Wenn Image nicht laedt (30% weiss/error), Fallback anzeigen
+    task.spawn(function()
+        task.wait(2)
+        if not ttImage.IsLoaded then
+            -- Try alternate IDs
+            for _, id in ipairs({"rbxassetid://116614859589960","rbxassetid://89897751123107","rbxassetid://76103604944596"}) do
+                ttImage.Image = id
+                task.wait(1)
+                if ttImage.IsLoaded then break end
+            end
+        end
+    end)
+
+    -- Log-Cap oben (Cross-Section vom Log)
+    local cap = New("Frame", {Parent = tt, Size = UDim2.fromScale(0.5, 0.08),
+        AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.02),
+        BackgroundColor3 = Color3.fromRGB(210, 160, 100), BorderSizePixel = 0})
+    New("UICorner", {Parent = cap, CornerRadius = UDim.new(1, 0)})
+    New("UIStroke", {Parent = cap, Color = Color3.fromRGB(80, 40, 15), Thickness = 2})
+    -- Ring am Cap (inner)
+    local capInner = New("Frame", {Parent = cap, Size = UDim2.fromScale(0.75, 0.6),
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5),
+        BackgroundColor3 = Color3.fromRGB(180, 130, 80), BorderSizePixel = 0})
+    New("UICorner", {Parent = capInner, CornerRadius = UDim.new(1, 0)})
+
+    -- Body (cylindrical log)
+    local body = New("Frame", {Parent = tt, Size = UDim2.fromScale(0.5, 0.62),
+        AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.08),
+        BackgroundColor3 = Color3.fromRGB(180, 130, 80), BorderSizePixel = 0})
+    New("UICorner", {Parent = body, CornerRadius = UDim.new(0, 6)})
+    New("UIStroke", {Parent = body, Color = Color3.fromRGB(80, 40, 15), Thickness = 2})
+    -- Holz-Gradient fuer 3D Look
+    New("UIGradient", {Parent = body, Rotation = 0, Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(140, 90, 50)),
+        ColorSequenceKeypoint.new(0.3, Color3.fromRGB(200, 150, 100)),
+        ColorSequenceKeypoint.new(0.7, Color3.fromRGB(200, 150, 100)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(140, 90, 50)),
+    }})
+    -- Wood-grain lines (5 duenne vertikale Streifen)
+    for _, x in ipairs({0.15, 0.32, 0.5, 0.65, 0.83}) do
+        New("Frame", {Parent = body, Size = UDim2.fromScale(0.008, 0.9),
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, 0.5),
+            BackgroundColor3 = Color3.fromRGB(100, 60, 25),
+            BackgroundTransparency = 0.4, BorderSizePixel = 0})
+    end
+
+    -- Augenbrauen (dicke kurve ueber den Augen)
+    for _, x in ipairs({0.32, 0.68}) do
+        local brow = New("Frame", {Parent = body, Size = UDim2.fromScale(0.22, 0.03),
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, 0.18),
+            BackgroundColor3 = Color3.fromRGB(60, 30, 10), BorderSizePixel = 0,
+            Rotation = (x == 0.32 and -10 or 10)})
+        New("UICorner", {Parent = brow, CornerRadius = UDim.new(1, 0)})
+    end
+
+    -- Augen (weiss mit schwarzer Pupille die zur Seite guckt)
+    for _, x in ipairs({0.32, 0.68}) do
+        local eye = New("Frame", {Parent = body, Size = UDim2.fromScale(0.18, 0.13),
+            AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(x, 0.28),
+            BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 0})
+        New("UICorner", {Parent = eye, CornerRadius = UDim.new(1, 0)})
+        New("UIStroke", {Parent = eye, Color = Color3.new(0,0,0), Thickness = 2})
+        -- Pupille (etwas nach rechts fuer seitwaerts-Blick)
+        local pup = New("Frame", {Parent = eye, AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.65, 0.55), Size = UDim2.fromScale(0.4, 0.5),
+            BackgroundColor3 = Color3.fromRGB(22,22,28), BorderSizePixel = 0})
+        New("UICorner", {Parent = pup, CornerRadius = UDim.new(1, 0)})
+        -- weisser Highlight-Dot
+        New("Frame", {Parent = pup, AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.35, 0.35), Size = UDim2.fromScale(0.3, 0.3),
+            BackgroundColor3 = Color3.new(1,1,1), BorderSizePixel = 0})
+    end
+
+    -- Nase (kleine dunkle Bump)
+    local nose = New("Frame", {Parent = body, Size = UDim2.fromScale(0.08, 0.06),
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.44),
+        BackgroundColor3 = Color3.fromRGB(90, 50, 20), BorderSizePixel = 0})
+    New("UICorner", {Parent = nose, CornerRadius = UDim.new(1, 0)})
+
+    -- Smile (2 kleine curves die ein Smile andeuten)
+    local smile = New("Frame", {Parent = body, Size = UDim2.fromScale(0.3, 0.03),
+        AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.55),
+        BackgroundColor3 = Color3.fromRGB(50, 20, 10), BorderSizePixel = 0})
+    New("UICorner", {Parent = smile, CornerRadius = UDim.new(1, 0)})
+
+    -- Arms (2 duenne braune Stangen an den Seiten)
+    for _, x in ipairs({0.15, 0.85}) do
+        local arm = New("Frame", {Parent = tt, Size = UDim2.fromScale(0.05, 0.3),
+            AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(x, 0.35),
+            BackgroundColor3 = Color3.fromRGB(180, 130, 80), BorderSizePixel = 0,
+            Rotation = (x == 0.15 and 10 or -10)})
+        New("UICorner", {Parent = arm, CornerRadius = UDim.new(1, 0)})
+        New("UIStroke", {Parent = arm, Color = Color3.fromRGB(80, 40, 15), Thickness = 1.5})
+    end
+
+    -- Beine (2 duenne braune Stangen unten)
+    for _, x in ipairs({0.42, 0.58}) do
+        local leg = New("Frame", {Parent = tt, Size = UDim2.fromScale(0.06, 0.18),
+            AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(x, 0.72),
+            BackgroundColor3 = Color3.fromRGB(180, 130, 80), BorderSizePixel = 0})
+        New("UICorner", {Parent = leg, CornerRadius = UDim.new(0, 3)})
+        New("UIStroke", {Parent = leg, Color = Color3.fromRGB(80, 40, 15), Thickness = 1.5})
+    end
+    -- Feet (kleine ovals unten)
+    for _, x in ipairs({0.42, 0.58}) do
+        local foot = New("Frame", {Parent = tt, Size = UDim2.fromScale(0.11, 0.05),
+            AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(x, 0.9),
+            BackgroundColor3 = Color3.fromRGB(160, 110, 65), BorderSizePixel = 0})
+        New("UICorner", {Parent = foot, CornerRadius = UDim.new(1, 0)})
+        New("UIStroke", {Parent = foot, Color = Color3.fromRGB(80, 40, 15), Thickness = 1.5})
+    end
+
+    Cache[p] = {box=box, boxStroke=boxStroke, name=name, dist=dist,
+        hpBg=hpBg, hpFg=hpFg, hpText=hpText, tracer=tracer, skeleton=skeleton,
+        highlight=highlight, tt=tt, ttText=ttText}
+end
+
+local function killESP(p)
+    local e = Cache[p]; if not e then return end
+    for k, d in pairs(e) do
+        if k == "skeleton" then
+            for _, l in ipairs(d) do l:Destroy() end
+        elseif typeof(d) == "Instance" then d:Destroy() end
+    end
+    Cache[p] = nil
+end
+
+for _, p in ipairs(Players:GetPlayers()) do if p ~= LP then makeESP(p) end end
+Players.PlayerAdded:Connect(function(p) if p ~= LP then makeESP(p) end end)
+Players.PlayerRemoving:Connect(killESP)
+
+-- ========= NPC ESP (fuer Infected Lands zombies + andere NPCs) =========
+-- Scannt workspace nach Models mit Humanoid die keine Players sind
+-- Tagged sie mit Highlight (chams-style) + BillboardGui name+distance
+do  -- wrap NPC ESP in do-block um local-register-limit zu schonen
+local NPCCache = {}
+task.spawn(function()
+    while task.wait(2.5) do  -- optimiert: 2.5s statt 1.5s
+        if not (C.BoxESP or C.NameESP or C.DistanceESP or C.ChamsEnabled) then
+            -- alle NPC tags hiden wenn kein ESP feature an
+            for m, e in pairs(NPCCache) do
+                if e.hl then e.hl.Enabled = false end
+                if e.bb then e.bb.Enabled = false end
+            end
+            continue
+        end
+        local myPos = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                      and LP.Character.HumanoidRootPart.Position or Vector3.new()
+        local seen = {}
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj ~= LP.Character
+            and not Players:GetPlayerFromCharacter(obj) then
+                local hum = obj:FindFirstChildOfClass("Humanoid")
+                local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
+                if hum and hrp and hum.Health > 0 then
+                    seen[obj] = true
+                    -- Erstelle oder update ESP fuer diesen NPC
+                    if not NPCCache[obj] then
+                        local hl = Instance.new("Highlight")
+                        hl.Adornee = obj
+                        hl.FillColor = C.ESPColor or Color3.fromRGB(255, 60, 90)
+                        hl.OutlineColor = C.ESPColor or Color3.fromRGB(255, 60, 90)
+                        hl.FillTransparency = 0.7
+                        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                        hl.Parent = GuiParent
+                        -- Ein billboardgui mit labels vertikal gestacked
+                        local bb = Instance.new("BillboardGui")
+                        bb.Adornee = hrp
+                        bb.Size = UDim2.fromOffset(180, 60)
+                        bb.StudsOffset = Vector3.new(0, 3.5, 0)
+                        bb.AlwaysOnTop = true
+                        bb.Parent = GuiParent
+                        -- HP BAR (side of character via ESPGui - screen space)
+                        local hpBg = New("Frame", {Parent=ESPGui, BackgroundColor3=Color3.fromRGB(22,22,28),
+                            BorderSizePixel=0, Visible=false})
+                        local hpFg = New("Frame", {Parent=hpBg, BorderSizePixel=0,
+                            AnchorPoint=Vector2.new(0, 1), Position=UDim2.fromScale(0, 1),
+                            Size=UDim2.fromScale(1, 1)})
+                        -- Name (top)
+                        local lbl = Instance.new("TextLabel", bb)
+                        lbl.BackgroundTransparency = 1
+                        lbl.Size = UDim2.new(1, 0, 0, 18)
+                        lbl.Position = UDim2.fromOffset(0, 0)
+                        lbl.Font = Enum.Font.GothamBold
+                        lbl.TextSize = 13
+                        lbl.TextColor3 = Color3.fromRGB(255, 100, 100)
+                        lbl.TextStrokeTransparency = 0
+                        -- HP text (middle)
+                        local hplbl = Instance.new("TextLabel", bb)
+                        hplbl.BackgroundTransparency = 1
+                        hplbl.Size = UDim2.new(1, 0, 0, 14)
+                        hplbl.Position = UDim2.fromOffset(0, 20)
+                        hplbl.Font = Enum.Font.Gotham
+                        hplbl.TextSize = 11
+                        hplbl.TextColor3 = Color3.fromRGB(80, 220, 100)
+                        hplbl.TextStrokeTransparency = 0
+                        -- Distance (bottom)
+                        local dlbl = Instance.new("TextLabel", bb)
+                        dlbl.BackgroundTransparency = 1
+                        dlbl.Size = UDim2.new(1, 0, 0, 14)
+                        dlbl.Position = UDim2.fromOffset(0, 36)
+                        dlbl.Font = Enum.Font.Gotham
+                        dlbl.TextSize = 11
+                        dlbl.TextColor3 = Color3.fromRGB(200, 200, 205)
+                        dlbl.TextStrokeTransparency = 0
+                        -- Screen-space Box (Frame in ESPGui)
+                        local boxFrame = New("Frame", {Parent=ESPGui, BackgroundTransparency=1,
+                            BorderSizePixel=0, Visible=false, AnchorPoint=Vector2.new(0.5, 0)})
+                        local boxStroke = New("UIStroke", {Parent=boxFrame,
+                            Color=Color3.fromRGB(255, 100, 100), Thickness=1.5})
+                        -- Tung Tung Sahur - full drawn character
+                        local ttBB = New("BillboardGui", {Parent=GuiParent, Adornee=hrp, Enabled=false,
+                            Size=UDim2.new(4, 0, 5.4, 0), StudsOffset=Vector3.new(0, 0.5, 0),
+                            AlwaysOnTop=true, LightInfluence=0})
+                        local ttcap = New("Frame", {Parent=ttBB, Size=UDim2.fromScale(0.5, 0.08),
+                            AnchorPoint=Vector2.new(0.5, 0), Position=UDim2.fromScale(0.5, 0.02),
+                            BackgroundColor3=Color3.fromRGB(210,160,100), BorderSizePixel=0})
+                        New("UICorner", {Parent=ttcap, CornerRadius=UDim.new(1,0)})
+                        New("UIStroke", {Parent=ttcap, Color=Color3.fromRGB(80,40,15), Thickness=2})
+                        local ttcapI = New("Frame", {Parent=ttcap, Size=UDim2.fromScale(0.75,0.6),
+                            AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(0.5,0.5),
+                            BackgroundColor3=Color3.fromRGB(180,130,80), BorderSizePixel=0})
+                        New("UICorner", {Parent=ttcapI, CornerRadius=UDim.new(1,0)})
+                        local ttbody = New("Frame", {Parent=ttBB, Size=UDim2.fromScale(0.5,0.62),
+                            AnchorPoint=Vector2.new(0.5,0), Position=UDim2.fromScale(0.5,0.08),
+                            BackgroundColor3=Color3.fromRGB(180,130,80), BorderSizePixel=0})
+                        New("UICorner", {Parent=ttbody, CornerRadius=UDim.new(0,6)})
+                        New("UIStroke", {Parent=ttbody, Color=Color3.fromRGB(80,40,15), Thickness=2})
+                        New("UIGradient", {Parent=ttbody, Rotation=0, Color=ColorSequence.new{
+                            ColorSequenceKeypoint.new(0, Color3.fromRGB(140,90,50)),
+                            ColorSequenceKeypoint.new(0.3, Color3.fromRGB(200,150,100)),
+                            ColorSequenceKeypoint.new(0.7, Color3.fromRGB(200,150,100)),
+                            ColorSequenceKeypoint.new(1, Color3.fromRGB(140,90,50)),
+                        }})
+                        for _, gx in ipairs({0.15,0.32,0.5,0.65,0.83}) do
+                            New("Frame", {Parent=ttbody, Size=UDim2.fromScale(0.008,0.9),
+                                AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(gx,0.5),
+                                BackgroundColor3=Color3.fromRGB(100,60,25),
+                                BackgroundTransparency=0.4, BorderSizePixel=0})
+                        end
+                        for _, ex in ipairs({0.32,0.68}) do
+                            local brow = New("Frame", {Parent=ttbody, Size=UDim2.fromScale(0.22,0.03),
+                                AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(ex,0.18),
+                                BackgroundColor3=Color3.fromRGB(60,30,10), BorderSizePixel=0,
+                                Rotation=(ex==0.32 and -10 or 10)})
+                            New("UICorner", {Parent=brow, CornerRadius=UDim.new(1,0)})
+                        end
+                        for _, ex in ipairs({0.32,0.68}) do
+                            local eye = New("Frame", {Parent=ttbody, Size=UDim2.fromScale(0.18,0.13),
+                                AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(ex,0.28),
+                                BackgroundColor3=Color3.new(1,1,1), BorderSizePixel=0})
+                            New("UICorner", {Parent=eye, CornerRadius=UDim.new(1,0)})
+                            New("UIStroke", {Parent=eye, Color=Color3.new(0,0,0), Thickness=2})
+                            local pup = New("Frame", {Parent=eye, AnchorPoint=Vector2.new(0.5,0.5),
+                                Position=UDim2.fromScale(0.65,0.55), Size=UDim2.fromScale(0.4,0.5),
+                                BackgroundColor3=Color3.fromRGB(22,22,28), BorderSizePixel=0})
+                            New("UICorner", {Parent=pup, CornerRadius=UDim.new(1,0)})
+                            New("Frame", {Parent=pup, AnchorPoint=Vector2.new(0.5,0.5),
+                                Position=UDim2.fromScale(0.35,0.35), Size=UDim2.fromScale(0.3,0.3),
+                                BackgroundColor3=Color3.new(1,1,1), BorderSizePixel=0})
+                        end
+                        local ttnose = New("Frame", {Parent=ttbody, Size=UDim2.fromScale(0.08,0.06),
+                            AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(0.5,0.44),
+                            BackgroundColor3=Color3.fromRGB(90,50,20), BorderSizePixel=0})
+                        New("UICorner", {Parent=ttnose, CornerRadius=UDim.new(1,0)})
+                        local ttsmile = New("Frame", {Parent=ttbody, Size=UDim2.fromScale(0.3,0.03),
+                            AnchorPoint=Vector2.new(0.5,0.5), Position=UDim2.fromScale(0.5,0.55),
+                            BackgroundColor3=Color3.fromRGB(50,20,10), BorderSizePixel=0})
+                        New("UICorner", {Parent=ttsmile, CornerRadius=UDim.new(1,0)})
+                        for _, ax in ipairs({0.15,0.85}) do
+                            local arm = New("Frame", {Parent=ttBB, Size=UDim2.fromScale(0.05,0.3),
+                                AnchorPoint=Vector2.new(0.5,0), Position=UDim2.fromScale(ax,0.35),
+                                BackgroundColor3=Color3.fromRGB(180,130,80), BorderSizePixel=0,
+                                Rotation=(ax==0.15 and 10 or -10)})
+                            New("UICorner", {Parent=arm, CornerRadius=UDim.new(1,0)})
+                            New("UIStroke", {Parent=arm, Color=Color3.fromRGB(80,40,15), Thickness=1.5})
+                        end
+                        for _, lx in ipairs({0.42,0.58}) do
+                            local leg = New("Frame", {Parent=ttBB, Size=UDim2.fromScale(0.06,0.18),
+                                AnchorPoint=Vector2.new(0.5,0), Position=UDim2.fromScale(lx,0.72),
+                                BackgroundColor3=Color3.fromRGB(180,130,80), BorderSizePixel=0})
+                            New("UICorner", {Parent=leg, CornerRadius=UDim.new(0,3)})
+                            New("UIStroke", {Parent=leg, Color=Color3.fromRGB(80,40,15), Thickness=1.5})
+                        end
+                        for _, fx in ipairs({0.42,0.58}) do
+                            local foot = New("Frame", {Parent=ttBB, Size=UDim2.fromScale(0.11,0.05),
+                                AnchorPoint=Vector2.new(0.5,0), Position=UDim2.fromScale(fx,0.9),
+                                BackgroundColor3=Color3.fromRGB(160,110,65), BorderSizePixel=0})
+                            New("UICorner", {Parent=foot, CornerRadius=UDim.new(1,0)})
+                            New("UIStroke", {Parent=foot, Color=Color3.fromRGB(80,40,15), Thickness=1.5})
+                        end
+                        NPCCache[obj] = {hl=hl, bb=bb, lbl=lbl, hplbl=hplbl, dlbl=dlbl, box=boxFrame, boxStroke=boxStroke, hpBg=hpBg, hpFg=hpFg, hum=hum, tt=ttBB}
+                    end
+                    local ent = NPCCache[obj]
+                    -- ESP color: from Colors tab (respected) - Rainbow nur wenn ChamsMode=Rainbow für chams itself
+                    local espColor = C.ESPColor or Color3.fromRGB(255, 60, 90)
+                    local chamsColor = espColor
+                    if C.ChamsMode == "Rainbow" then
+                        local hue = (tick() * 0.3) % 1
+                        chamsColor = Color3.fromHSV(hue, 1, 1)
+                    end
+                    ent.hl.Enabled = C.ChamsEnabled == true
+                    ent.hl.FillColor = chamsColor
+                    ent.hl.OutlineColor = chamsColor
+                    ent.lbl.TextColor3 = espColor
+                    ent.boxStroke.Color = espColor
+                    ent.bb.Enabled = (C.NameESP or C.HealthTextESP or C.DistanceESP) == true
+                    ent.lbl.Visible = C.NameESP == true
+                    ent.hplbl.Visible = C.HealthTextESP == true
+                    ent.dlbl.Visible = C.DistanceESP == true
+                    if C.NameESP then
+                        local label = obj.Name
+                        if #label > 20 then label = label:sub(1,18) .. ".." end
+                        ent.lbl.Text = label
+                    end
+                    if C.HealthTextESP then
+                        ent.hplbl.Text = tostring(math.floor(hum.Health))
+                    end
+                    if C.DistanceESP then
+                        local d = math.floor((myPos - hrp.Position).Magnitude)
+                        ent.dlbl.Text = "[" .. d .. "m]"
+                    end
+                end
+            end
+        end
+        -- Cleanup: NPCs die weg sind
+        for m, e in pairs(NPCCache) do
+            if not seen[m] or not m.Parent then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.bb:Destroy() end)
+                pcall(function() if e.box then e.box:Destroy() end end)
+                pcall(function() if e.hpBg then e.hpBg:Destroy() end end)
+                pcall(function() if e.tt then e.tt:Destroy() end end)
+                NPCCache[m] = nil
+            end
+        end
+    end
+end)
+
+warn("[QUARTERTEST] reached line 3916 successfully")
