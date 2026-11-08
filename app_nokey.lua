@@ -43,7 +43,6 @@ local State = {
     lastEspScan    = nil,   -- (was a _G global)
     chamsTarget    = nil,   -- (was a _G global)
     espCache       = {},    -- (was a _G global)
-    lastCacheTime  = 0,     -- (was a _G global)
 }
 
 -- Camera safety: falls freecam vom letzten run noch Scriptable ist -> zurueck auf Custom
@@ -80,6 +79,8 @@ local C = {
     DistanceESP    = true,
     ESP_MaxDistance = 5000,  -- max studs fuer player ESP
     ESP_Unlimited   = false, -- bypasst distance-limit komplett
+    ESP_BoxPrecisionDist = 150,  -- studs; tight per-part box bounds only inside this range,
+                                  -- cheap 2-point approx beyond it (perf, scales with player count)
     TracerESP      = false,
     TracerOrigin   = "Bottom",  -- Bottom / Top / Center
     SkeletonESP    = false,
@@ -904,6 +905,7 @@ Toggle(pVis, "Health ESP", "HealthESP")
 Toggle(pVis, "HP Text (87/100)", "HealthTextESP")
 Toggle(pVis, "Distance ESP", "DistanceESP")
 Slider(pVis, "ESP Max Distance (players)", "ESP_MaxDistance", 50, 5000, 50)
+Slider(pVis, "Box Precision Range (perf)", "ESP_BoxPrecisionDist", 0, 1000, 25)
 Toggle(pVis, "ESP Unlimited Distance", "ESP_Unlimited")
 Toggle(pVis, "Tracer Lines", "TracerESP")
 -- Tracer Origin Cycle
@@ -3228,13 +3230,17 @@ end
 
 -- NPC cache: workspace scan alle 1s (verhindert lag)
 State.espCache = {}
-State.lastCacheTime = 0
 
-local function nearest()
-    local best, bd = nil, math.huge
-    -- Refresh NPC list alle 1s (inlined - kein extra local function)
-    if tick() - State.lastCacheTime > 1 then
-        State.lastCacheTime = tick()
+-- Perf: the NPC cache used to rebuild inline inside nearest(), which runs on the
+-- aimbot's hot RenderStepped path. Once every ~1s that rebuild did a full
+-- Workspace:GetDescendants() scan (every instance in the whole map) on the SAME
+-- frame as an active aim-lock -- that's the lag spike specifically noticeable while
+-- locking onto a player: 59 cheap frames, then one frame doing a full-map walk.
+-- Fix: move the rebuild to its own low-priority task.spawn loop, decoupled from the
+-- render/aim path entirely. nearest() now only ever reads the cache, never rebuilds it.
+task.spawn(function()
+    while true do
+        task.wait(1)
         State.espCache = {}
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("Model") and obj ~= LP.Character and not Players:GetPlayerFromCharacter(obj) then
@@ -3243,6 +3249,10 @@ local function nearest()
             end
         end
     end
+end)
+
+local function nearest()
+    local best, bd = nil, math.huge
     -- PLAYERS
     for _, p in ipairs(Players:GetPlayers()) do
         if valid(p) then
@@ -4055,10 +4065,24 @@ RunService.RenderStepped:Connect(function()
                 e.hpBg.Visible, e.tracer.Visible = false, false
                 for _, l in ipairs(e.skeleton) do l.Visible = false end
             else
-                -- Echte character-bounds via GetChildren (works R6+R15+custom)
-                local onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
+                -- Perf: getCharBounds does 8x WorldToViewportPoint calls PER PART (every
+                -- BasePart in the rig) to get a pixel-tight box. That's the real lag
+                -- source on servers with lots of visible players (Infected Lands) --
+                -- it was running unconditionally for every enemy, every frame.
+                -- Fix: only pay for the precise per-part scan on enemies close enough
+                -- that box-tightness is actually visible; everyone farther out gets the
+                -- cheap 2-point head/root approximation (same math the far-fallback
+                -- below already used, just now the default instead of the exception).
+                local myRootForBox = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local distForBox = myRootForBox and (myRootForBox.Position - root.Position).Magnitude or math.huge
+                local useTightBox = distForBox <= (C.ESP_BoxPrecisionDist or 150)
+
                 local topPos, botPos, w, h, topY
-                if onScr then
+                local onScr, bMinX, bMinY, bMaxX, bMaxY
+                if useTightBox then
+                    onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
+                end
+                if useTightBox and onScr then
                     w = bMaxX - bMinX
                     h = bMaxY - bMinY
                     topY  = bMinY
