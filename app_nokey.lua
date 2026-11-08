@@ -31,14 +31,21 @@ pcall(function()
     end
 end)
 
--- ========= SUPER-SAFE SPEED (adaptive cap gegen Infected Lands AC) =========
-_G.ZQ_tZCydCwI = true  -- extra vorsichtiger modus fuer strenge ACs
+-- ========= Centralized script state (replaces scattered _G.* globals) =========
+-- Scoped to this script's closure instead of _G, so a fresh inject always starts
+-- clean -- no more manual _G nulling, no stale state carried over from a prior run.
+local State = {
+    safeMode       = true,  -- extra-cautious mode (was a _G global)
+    toggleRefresh  = {},    -- UI toggle refresh callbacks list (was a _G global)
+    isAiming       = false, -- (was a _G global)
+    aimLockTarget  = nil,   -- (was a _G global)
+    mobileAimDown  = false, -- (was a _G global)
+    lastEspScan    = nil,   -- (was a _G global)
+    chamsTarget    = nil,   -- (was a _G global)
+    espCache       = {},    -- (was a _G global)
+    lastCacheTime  = 0,     -- (was a _G global)
+}
 
--- ========= CLEANUP alter globals bei re-inject (verhindert stale-state bugs) =========
-_G.xifbTlDo_REFRESH  = nil
-_G.ZQ_eVBTQlkm      = nil
-_G.ZQ_xlCTfPwE      = nil
-_G.ZQ_XyiqJoAs = nil
 -- Camera safety: falls freecam vom letzten run noch Scriptable ist -> zurueck auf Custom
 pcall(function()
     if Camera.CameraType == Enum.CameraType.Scriptable then
@@ -227,9 +234,27 @@ pcall(function()
     if game.CoreGui:FindFirstChild("lSpGsHPf") then game.CoreGui.lSpGsHPf:Destroy() end
 end)
 local GuiParent = (gethui and gethui()) or game:GetService("CoreGui")
-warn("[APP] GuiParent resolved to: " .. GuiParent:GetFullName() .. " | gethui exists: " .. tostring(gethui ~= nil))
 
-local function New(c, p) local i = Instance.new(c); for k,v in pairs(p or {}) do i[k]=v end; return i end
+-- New() is the single choke point every GUI element in this script is built through.
+-- Hardening it here (instead of wrapping the ~2500-line builder in one pcall, which
+-- would scope Gui/Main/Tabs/etc away from the combat code that reads them later)
+-- means a bad property or a Parent that refuses the Instance fails loud right at the
+-- object that caused it, instead of silently killing everything built after it.
+local function New(c, p)
+    local ok, result = pcall(function()
+        local i = Instance.new(c)
+        for k, v in pairs(p or {}) do i[k] = v end
+        return i
+    end)
+    if not ok then
+        warn("[APP] New(\"" .. tostring(c) .. "\") failed: " .. tostring(result))
+        -- Return an unparented placeholder so callers that index the result (and any
+        -- :Destroy()/property sets elsewhere) don't throw a second, confusing error
+        -- on top of the real one.
+        return Instance.new(c)
+    end
+    return result
+end
 local function Tween(o, t, p, s) TS:Create(o, TweenInfo.new(t, s or Enum.EasingStyle.Quart), p):Play() end
 
 -- ========= ESP GUI (unter dem Menue, damit Menue drueber liegt) =========
@@ -260,33 +285,29 @@ local Gui = New("ScreenGui", {Name="tfBfqVxp", Parent=GuiParent, ResetOnSpawn=fa
 local BG_LOCK      = Color3.fromRGB(0, 0, 0)     -- Main / Top / Side / StatusBar
 local BG_LOCK_ROW  = Color3.fromRGB(10, 10, 12)  -- Toggle/Slider/Colorpicker rows (minimal heller fuer Kontrast)
 
--- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut, jeden Frame
--- Nur AccentTarget-Elemente (Streifen, Glows, Slider-Fill, Section-Bars) duerfen Farbe haben
-task.spawn(function()
-    while true do
-        task.wait(0.1)  -- 10x pro Sekunde, kein spuerbarer perf hit
-        if not Gui or not Gui.Parent then break end
-        for _, obj in ipairs(Gui:GetDescendants()) do
-            if obj:IsA("GuiObject") then
-                local accent = obj:GetAttribute("AccentTarget")
-                local locked = obj:GetAttribute("BgLocked")
-                if locked then
-                    pcall(function() obj.BackgroundColor3 = BG_LOCK end)
-                elseif not accent then
-                    -- Kein AccentTarget -> Background darf NIE eine kraeftige Farbe kriegen
-                    -- Nur rows die BG_LOCK_ROW haben sollen behalten das
-                    local cur = obj.BackgroundColor3
-                    -- Wenn's ein row-artiges dark element ist, lock auf BG_LOCK_ROW
-                    if cur == Color3.fromRGB(14,14,18)
-                    or cur == Color3.fromRGB(22,22,28)
-                    or cur == Color3.fromRGB(14,14,20) then
-                        pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
-                    end
-                end
-            end
+-- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut.
+-- Was a 10x/sec poll over Gui:GetDescendants() (a full recursive re-walk of every
+-- menu element, forever, for the script's whole lifetime -- real perf cost on a
+-- ~2500-line UI tree). Replaced with the same enforcement run once per object via
+-- DescendantAdded (catches everything built after this point) plus one immediate
+-- pass over what already exists, instead of re-scanning the whole tree on a timer.
+local function enforceBgLock(obj)
+    if not obj:IsA("GuiObject") then return end
+    local accent = obj:GetAttribute("AccentTarget")
+    local locked = obj:GetAttribute("BgLocked")
+    if locked then
+        pcall(function() obj.BackgroundColor3 = BG_LOCK end)
+    elseif not accent then
+        local cur = obj.BackgroundColor3
+        if cur == Color3.fromRGB(14,14,18)
+        or cur == Color3.fromRGB(22,22,28)
+        or cur == Color3.fromRGB(14,14,20) then
+            pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
         end
     end
-end)
+end
+for _, obj in ipairs(Gui:GetDescendants()) do enforceBgLock(obj) end
+Gui.DescendantAdded:Connect(enforceBgLock)
 
 local Main = New("Frame", {
     Parent = Gui, Size = UDim2.fromOffset(700, 550),
@@ -625,8 +646,8 @@ local function Toggle(parent, label, key)
     end
     refresh()
     -- Register refresh callback global damit loadSlot alle toggles re-syncen kann
-    _G.xifbTlDo_REFRESH = _G.xifbTlDo_REFRESH or {}
-    table.insert(_G.xifbTlDo_REFRESH, refresh)
+    State.toggleRefresh = State.toggleRefresh or {}
+    table.insert(State.toggleRefresh, refresh)
     row.MouseButton1Click:Connect(function()
         C[key] = not C[key]; refresh()
     end)
@@ -1362,8 +1383,8 @@ task.spawn(function()
 
         if farmMode == "MM2" then
             -- Debug: zeig LO was passiert
-            if not _G.ZQ_KnIvvaPM or tick() - _G.ZQ_KnIvvaPM > 2 then
-                _G.ZQ_KnIvvaPM = tick()
+            if not State.lastEspScan or tick() - State.lastEspScan > 2 then
+                State.lastEspScan = tick()
                 pcall(function()
                     game.StarterGui:SetCore("SendNotification", {
                         Title = "Farm",
@@ -1680,7 +1701,7 @@ do
             and i.UserInputType ~= Enum.UserInputType.Touch then return end
             if tick() - specLast < 0.3 then return end
             specLast = tick()
-            _G.ZQ_fFryVOfA = p
+            State.chamsTarget = p
             pcall(function()
                 game.StarterGui:SetCore("SendNotification",
                     {Title="ENI", Text="Spec "..p.DisplayName, Duration=1.2})
@@ -1760,7 +1781,7 @@ do
         AutoButtonColor=false, ZIndex=3})
     New("UICorner", {Parent=stopSpec, CornerRadius=UDim.new(0,2)})
     local function doStop()
-        _G.ZQ_fFryVOfA = nil
+        State.chamsTarget = nil
         local myHum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
         if myHum then Camera.CameraSubject = myHum end
     end
@@ -1770,7 +1791,7 @@ do
 
     -- persistent spectate loop (überschreibt AC-Camera-Reset jeden Frame)
     RunService.RenderStepped:Connect(function()
-        local target = _G.ZQ_fFryVOfA
+        local target = State.chamsTarget
         if target and target.Character then
             local tHum = target.Character:FindFirstChildOfClass("Humanoid")
             if tHum then
@@ -2619,8 +2640,8 @@ do
         end)
         if ok then
             -- Alle Toggle-checkboxes visuell mit neuem C-state re-syncen
-            if _G.xifbTlDo_REFRESH then
-                for _, refresh in ipairs(_G.xifbTlDo_REFRESH) do
+            if State.toggleRefresh then
+                for _, refresh in ipairs(State.toggleRefresh) do
                     pcall(refresh)
                 end
             end
@@ -2732,7 +2753,6 @@ New("TextLabel", {Parent=info, BackgroundTransparency=1, Size=UDim2.fromScale(1,
     TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center})
 
 selectTab("Combat")
-warn("[APP] UI build complete. Gui.Parent=" .. tostring(Gui.Parent) .. " Gui.Enabled=" .. tostring(Gui.Enabled) .. " Main visible under: " .. Gui:GetFullName())
 
 -- ========= Toggle menu with custom keybind =========
 UIS.InputBegan:Connect(function(i, gp)
@@ -2833,7 +2853,7 @@ end
 -- Tap = Aim ON (lockt), nochmal Tap = OFF (kann wieder frei kucken).
 -- Draggable damit user ihn hinschieben kann wo er moechte.
 if UIS.TouchEnabled and not UIS.KeyboardEnabled then
-    _G.ZQ_XyiqJoAs = false
+    State.mobileAimDown = false
 
     local AimBtn = New("TextButton", {
         Parent = Gui, Name = "tEHRZlAi",
@@ -2858,7 +2878,7 @@ if UIS.TouchEnabled and not UIS.KeyboardEnabled then
                 AimBtn.Visible = true
             elseif not C.AimEnabled and AimBtn.Visible then
                 AimBtn.Visible = false
-                _G.ZQ_XyiqJoAs = false  -- reset wenn aim disabled wird
+                State.mobileAimDown = false  -- reset wenn aim disabled wird
             end
         end
     end)
@@ -2899,8 +2919,8 @@ if UIS.TouchEnabled and not UIS.KeyboardEnabled then
         or input.UserInputType == Enum.UserInputType.Touch then
             if dragging and not moved then
                 -- Tap -> toggle aim
-                _G.ZQ_XyiqJoAs = not _G.ZQ_XyiqJoAs
-                if _G.ZQ_XyiqJoAs then
+                State.mobileAimDown = not State.mobileAimDown
+                if State.mobileAimDown then
                     -- ON: rot leuchten + press feedback
                     AimBtn.BackgroundColor3 = Color3.fromRGB(180, 30, 45)
                     aimStroke.Color         = Color3.fromRGB(255, 80, 100)
@@ -3207,19 +3227,19 @@ local function valid(p)
 end
 
 -- NPC cache: workspace scan alle 1s (verhindert lag)
-_G.ZQ_YXNvPrcW = {}
-_G.ZQ_iUKZoNXd = 0
+State.espCache = {}
+State.lastCacheTime = 0
 
 local function nearest()
     local best, bd = nil, math.huge
     -- Refresh NPC list alle 1s (inlined - kein extra local function)
-    if tick() - _G.ZQ_iUKZoNXd > 1 then
-        _G.ZQ_iUKZoNXd = tick()
-        _G.ZQ_YXNvPrcW = {}
+    if tick() - State.lastCacheTime > 1 then
+        State.lastCacheTime = tick()
+        State.espCache = {}
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("Model") and obj ~= LP.Character and not Players:GetPlayerFromCharacter(obj) then
                 local hum = obj:FindFirstChildOfClass("Humanoid")
-                if hum then table.insert(_G.ZQ_YXNvPrcW, obj) end
+                if hum then table.insert(State.espCache, obj) end
             end
         end
     end
@@ -3241,10 +3261,10 @@ local function nearest()
         end
     end
     -- NPCs aus cache (kein workspace-scan pro frame)
-    for i = #_G.ZQ_YXNvPrcW, 1, -1 do
-        local obj = _G.ZQ_YXNvPrcW[i]
+    for i = #State.espCache, 1, -1 do
+        local obj = State.espCache[i]
         if not obj or not obj.Parent then
-            table.remove(_G.ZQ_YXNvPrcW, i)
+            table.remove(State.espCache, i)
         else
             local hum = obj:FindFirstChildOfClass("Humanoid")
             local part = obj:FindFirstChild(C.AimPart) or obj:FindFirstChild("Head") or obj:FindFirstChild("HumanoidRootPart")
@@ -3282,9 +3302,9 @@ local stickyTime   = 0
 RunService.RenderStepped:Connect(function()
     if not C.AimEnabled then stickyTarget = nil; return end
     local isAiming = false
-    -- MOBILE-support: der floating aim button setzt _G.ZQ_XyiqJoAs
+    -- MOBILE-support: der floating aim button setzt State.mobileAimDown
     -- Wenn mobile + button active -> aim ist an, egal was AimMode sagt
-    if _G.ZQ_XyiqJoAs then
+    if State.mobileAimDown then
         isAiming = true
     elseif C.AimMode == "AlwaysOn" then
         isAiming = true
@@ -3295,8 +3315,8 @@ RunService.RenderStepped:Connect(function()
     elseif C.AimMode == "KeyE" then
         isAiming = UIS:IsKeyDown(Enum.KeyCode.E)
     end
-    _G.ZQ_eVBTQlkm = isAiming  -- global flag fuer AutoShot
-    if not isAiming then stickyTarget = nil; _G.ZQ_xlCTfPwE = nil; return end
+    State.isAiming = isAiming  -- global flag fuer AutoShot
+    if not isAiming then stickyTarget = nil; State.aimLockTarget = nil; return end
     local t = nearest()
     -- Sticky: wenn kein neuer target aber alter ist noch alive -> weiter aim
     if t then
@@ -3319,7 +3339,7 @@ RunService.RenderStepped:Connect(function()
               or t.Character:FindFirstChild("HumanoidRootPart")
               or t.Character:FindFirstChild("Torso")
     if not part then return end
-    _G.ZQ_xlCTfPwE = t  -- Aimbot lockt aktiv auf diesen Player -> AutoShot darf feuern
+    State.aimLockTarget = t  -- Aimbot lockt aktiv auf diesen Player -> AutoShot darf feuern
     local cf = CFrame.new(Camera.CFrame.Position, part.Position)
     -- MOBILE-fix: NIE instant-snappen (fightet mit touch-camera -> wildes swingen)
     -- Auch die Smoothness weicher machen auf mobile damit keine oscillation entsteht
@@ -3386,8 +3406,8 @@ task.spawn(function()
         if not C.AutoShot then continue end
         -- GATE: Aimbot muss aktiv sein UND auf jemanden gelockt haben
         if not C.AimEnabled then continue end
-        if not _G.ZQ_eVBTQlkm then continue end
-        local target = _G.ZQ_xlCTfPwE
+        if not State.isAiming then continue end
+        local target = State.aimLockTarget
         if not target then continue end
         -- Target noch alive?
         local tChar = target.Character
@@ -4179,8 +4199,7 @@ end)
 -- =================================================
 do
 -- ========= DIRECT SPEED + JUMP mit reset protection (via PropertyChangedSignal, kein Heartbeat-Loop!) =========
-_G.ZQ_Jrgtuwbz = nil
-_G.ZQ_IbNbAwqZ = nil
+-- (two unused dead globals previously declared here were removed; nothing read them)
 
 local function hookHumanoid(hum)
     -- Speed protection: reagiert nur wenn WalkSpeed sich aendert (kein Loop)
