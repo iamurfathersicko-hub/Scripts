@@ -2755,6 +2755,7 @@ New("TextLabel", {Parent=info, BackgroundTransparency=1, Size=UDim2.fromScale(1,
     TextXAlignment=Enum.TextXAlignment.Left, TextYAlignment=Enum.TextYAlignment.Center})
 
 selectTab("Combat")
+warn("[APP] checkpoint: menu UI built, selectTab done")
 
 -- ========= Toggle menu with custom keybind =========
 UIS.InputBegan:Connect(function(i, gp)
@@ -3250,6 +3251,7 @@ task.spawn(function()
         end
     end
 end)
+warn("[APP] checkpoint: NPC cache task.spawn registered, continuing past line 3253")
 
 local function nearest()
     local best, bd = nil, math.huge
