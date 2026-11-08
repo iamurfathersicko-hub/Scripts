@@ -73,6 +73,8 @@ local C = {
     DistanceESP    = true,
     ESP_MaxDistance = 5000,  -- max studs fuer player ESP
     ESP_Unlimited   = false, -- bypasst distance-limit komplett
+    ESP_BoxPrecisionDist = 150,  -- studs; tight per-part box bounds only inside this range,
+                                  -- cheap 2-point approx beyond it (perf, scales with player count)
     TracerESP      = false,
     TracerOrigin   = "Bottom",  -- Bottom / Top / Center
     SkeletonESP    = false,
@@ -883,6 +885,7 @@ Toggle(pVis, "Health ESP", "HealthESP")
 Toggle(pVis, "HP Text (87/100)", "HealthTextESP")
 Toggle(pVis, "Distance ESP", "DistanceESP")
 Slider(pVis, "ESP Max Distance (players)", "ESP_MaxDistance", 50, 5000, 50)
+Slider(pVis, "Box Precision Range (perf)", "ESP_BoxPrecisionDist", 0, 1000, 25)
 Toggle(pVis, "ESP Unlimited Distance", "ESP_Unlimited")
 Toggle(pVis, "Tracer Lines", "TracerESP")
 -- Tracer Origin Cycle
@@ -2304,8 +2307,14 @@ local function isDeadBody(obj)
     return false
 end
 
+-- Perf: this was scanning the WHOLE workspace twice a second regardless -- every
+-- other full-map scan in this script (item ESP, NPC ESP, aimbot NPC cache) settled
+-- on 1-2.5s intervals after the author tuned them; this one was left at 0.5s. Dead
+-- bodies also accumulate and never despawn mid-round on a game like Infected Lands,
+-- so this scan's cost grows across a match -- matches a "gets laggier over time"
+-- symptom specifically. Bumped to 2s to match the sibling features' settled cadence.
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(2) do
         if C.DeadBodyESP then
             local seen = {}
             for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -3208,13 +3217,15 @@ end
 
 -- NPC cache: workspace scan alle 1s (verhindert lag)
 _G.ZQ_YXNvPrcW = {}
-_G.ZQ_iUKZoNXd = 0
 
-local function nearest()
-    local best, bd = nil, math.huge
-    -- Refresh NPC list alle 1s (inlined - kein extra local function)
-    if tick() - _G.ZQ_iUKZoNXd > 1 then
-        _G.ZQ_iUKZoNXd = tick()
+-- Perf: this rebuild used to run INSIDE nearest(), which executes every frame while
+-- actively aiming. Once every ~1s it did a full Workspace:GetDescendants() scan (the
+-- whole map) on the SAME frame as aim-lock math -- that's the lag spike specifically
+-- felt when locking onto a player. Moved to its own independent timer, fully
+-- decoupled from the aim/render path. nearest() below now only reads the cache.
+task.spawn(function()
+    while true do
+        task.wait(1)
         _G.ZQ_YXNvPrcW = {}
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj:IsA("Model") and obj ~= LP.Character and not Players:GetPlayerFromCharacter(obj) then
@@ -3223,6 +3234,10 @@ local function nearest()
             end
         end
     end
+end)
+
+local function nearest()
+    local best, bd = nil, math.huge
     -- PLAYERS
     for _, p in ipairs(Players:GetPlayers()) do
         if valid(p) then
@@ -4035,10 +4050,24 @@ RunService.RenderStepped:Connect(function()
                 e.hpBg.Visible, e.tracer.Visible = false, false
                 for _, l in ipairs(e.skeleton) do l.Visible = false end
             else
-                -- Echte character-bounds via GetChildren (works R6+R15+custom)
-                local onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
+                -- Perf: getCharBounds does 8x WorldToViewportPoint calls PER PART (every
+                -- BasePart in the rig) to get a pixel-tight box. Running that for every
+                -- visible enemy every frame is the main cost that scales with player
+                -- count (Infected Lands' higher lobbies especially). Fix: only pay for
+                -- the precise per-part scan on enemies close enough that box-tightness
+                -- is actually visible; farther enemies get the cheap 2-point
+                -- head/root approximation (the same math the far-fallback below
+                -- already used, just now the default instead of the exception).
+                local myRootForBox = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local distForBox = myRootForBox and (myRootForBox.Position - root.Position).Magnitude or math.huge
+                local useTightBox = distForBox <= (C.ESP_BoxPrecisionDist or 150)
+
+                local onScr, bMinX, bMinY, bMaxX, bMaxY
+                if useTightBox then
+                    onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
+                end
                 local topPos, botPos, w, h, topY
-                if onScr then
+                if useTightBox and onScr then
                     w = bMaxX - bMinX
                     h = bMaxY - bMinY
                     topY  = bMinY
