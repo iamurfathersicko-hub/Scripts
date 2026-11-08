@@ -3915,4 +3915,1161 @@ task.spawn(function()
     end
 end)
 
-warn("[QUARTERTEST] reached line 3916 successfully")
+-- NPC Box ESP + HP Bar: per-frame screen-space positioning
+RunService.RenderStepped:Connect(function()
+    -- Rainbow color per-frame (smooth transition)
+    local rainbowNow
+    if C.ChamsMode == "Rainbow" then
+        rainbowNow = Color3.fromHSV((tick() * 0.15) % 1, 0.95, 1)
+    end
+    local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+    local myPos = myRoot and myRoot.Position or Vector3.new()
+    local maxDist = C.ESP_MaxDistance or 5000
+    local unlimited = C.ESP_Unlimited == true
+    for _, ent in pairs(NPCCache) do
+        if ent.box and ent.hum and ent.hum.Parent then
+            local char = ent.hum.Parent
+            local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
+            local head = char:FindFirstChild("Head") or hrp
+            -- Distance check (hidet ALLES bei out of range)
+            local outOfRange = false
+            if hrp and not unlimited and myRoot then
+                if (myPos - hrp.Position).Magnitude > maxDist then outOfRange = true end
+            end
+            if outOfRange then
+                if ent.hl then ent.hl.Enabled = false end
+                if ent.bb then ent.bb.Enabled = false end
+                if ent.tt then ent.tt.Enabled = false end
+                if ent.box then ent.box.Visible = false end
+                if ent.hpBg then ent.hpBg.Visible = false end
+                continue
+            end
+            if ent.hl and rainbowNow then
+                ent.hl.FillColor = rainbowNow
+                ent.hl.OutlineColor = rainbowNow
+            end
+            if ent.tt then ent.tt.Enabled = (C.TongTong == true) end
+            if hrp and head then
+                local rootPos = Camera:WorldToViewportPoint(hrp.Position)
+                local topPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 1.5, 0))
+                local botPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+                if rootPos.Z > 0 then
+                    local h = math.abs(botPos.Y - topPos.Y)
+                    local w = h * 0.5
+                    -- Box
+                    if C.BoxESP then
+                        ent.box.Position = UDim2.fromOffset(rootPos.X, topPos.Y)
+                        ent.box.Size = UDim2.fromOffset(w, h)
+                        ent.box.Visible = true
+                    else
+                        ent.box.Visible = false
+                    end
+                    -- HP Bar (side)
+                    if C.HealthESP then
+                        local pct = math.clamp(ent.hum.Health / math.max(ent.hum.MaxHealth, 1), 0, 1)
+                        ent.hpBg.Position = UDim2.fromOffset(rootPos.X - w/2 - 6, topPos.Y)
+                        ent.hpBg.Size = UDim2.fromOffset(3, h)
+                        ent.hpBg.Visible = true
+                        ent.hpFg.Size = UDim2.fromScale(1, pct)
+                        ent.hpFg.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-pct)), math.floor(220*pct), 60)
+                    else
+                        ent.hpBg.Visible = false
+                    end
+                else
+                    ent.box.Visible = false
+                    ent.hpBg.Visible = false
+                end
+            end
+        end
+    end
+end)
+end  -- ende NPC ESP do-block (freigabe von locals)
+
+-- Drawing ESP removed (was causing script to fail on some executors)
+
+-- Helper: hide alle visuellen Elemente eines ESP-Eintrags
+local function hideAll(e)
+    e.box.Visible, e.name.Visible, e.dist.Visible = false, false, false
+    e.hpBg.Visible, e.tracer.Visible = false, false
+    if e.hpText then e.hpText.Visible = false end
+    for _, l in ipairs(e.skeleton) do l.Visible = false end
+    e.highlight.Enabled = false
+    if e.tt then e.tt.Enabled = false end
+end
+
+RunService.RenderStepped:Connect(function()
+    for p, e in pairs(Cache) do
+        local char = p.Character
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and char:FindFirstChild("Head")
+        local alive = char and hum and hum.Health > 0 and root
+
+        if not alive then
+            hideAll(e)
+        else
+            local isMate = p.Team ~= nil and p.Team == LP.Team
+            local color = ((C.TeamESP or C.TeamCheck) and isMate) and C.ESPTeamColor or C.ESPColor
+
+            -- Tung Tung Sahur - cover the enemy character (attached to HRP)
+            if C.TongTong and root then
+                e.tt.Adornee = root
+                e.tt.Enabled = true
+                if e.ttText then e.ttText.Visible = true end
+            else
+                e.tt.Enabled = false
+                if e.ttText then e.ttText.Visible = false end
+            end
+
+            -- Chams (Highlight mit multi-mode support)
+            if C.ChamsEnabled then
+                if e.highlight.Adornee ~= char then e.highlight.Adornee = char end
+                local mode = C.ChamsMode
+                local chamsColor = color
+                if mode == "Rainbow" then
+                    local hue = (tick() * 0.15) % 1
+                    chamsColor = Color3.fromHSV(hue, 0.95, 1)
+                end
+                e.highlight.FillColor    = chamsColor
+                e.highlight.OutlineColor = chamsColor
+                if mode == "Fill" then
+                    e.highlight.FillTransparency    = C.ChamsFill
+                    e.highlight.OutlineTransparency = 1
+                elseif mode == "Outline" then
+                    e.highlight.FillTransparency    = 1
+                    e.highlight.OutlineTransparency = 0
+                elseif mode == "Wireframe" then
+                    e.highlight.FillTransparency    = 1
+                    e.highlight.OutlineTransparency = 0
+                    e.highlight.OutlineColor        = Color3.new(1,1,1)  -- weisse wireframe
+                else  -- "Both" oder "Rainbow"
+                    e.highlight.FillTransparency    = C.ChamsFill
+                    e.highlight.OutlineTransparency = 0
+                end
+                e.highlight.Enabled = true
+            else
+                e.highlight.Enabled = false
+            end
+
+            local rootPos = Camera:WorldToViewportPoint(root.Position)
+            -- Max-distance check: wenn Player weiter weg als slider-limit -> alles hiden
+            local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+            local playerDist = myRoot and (myRoot.Position - root.Position).Magnitude or 0
+            local outOfRange = myRoot and not C.ESP_Unlimited and playerDist > (C.ESP_MaxDistance or 5000)
+            if outOfRange then
+                e.highlight.Enabled = false
+                e.tt.Enabled = false
+                if e.ttText then e.ttText.Visible = false end
+            end
+            -- Perf: Name/Distance/Health ESP all reuse the same bounds setup that
+            -- Box ESP needs (they're not independent -- Distance/Health position
+            -- themselves off the box's computed top/bottom). That setup block was
+            -- running for every on-screen enemy every frame even when NONE of these
+            -- toggles were on -- e.g. turning on only Name ESP still paid for the
+            -- full box-bounds projection work. Skip the whole block when nothing
+            -- that needs it is actually enabled.
+            local anyEspFeatureOn = C.BoxESP or C.NameESP or C.DistanceESP or C.HealthESP or C.HealthTextESP
+            if rootPos.Z <= 0 or outOfRange or not anyEspFeatureOn then
+                e.box.Visible, e.name.Visible, e.dist.Visible = false, false, false
+                e.hpBg.Visible, e.tracer.Visible = false, false
+                if e.hpText then e.hpText.Visible = false end
+                for _, l in ipairs(e.skeleton) do l.Visible = false end
+            else
+                -- Perf: getCharBounds does 8x WorldToViewportPoint calls PER PART (every
+                -- BasePart in the rig) to get a pixel-tight box. Running that for every
+                -- visible enemy every frame is the main cost that scales with player
+                -- count (Infected Lands' higher lobbies especially). Fix: only pay for
+                -- the precise per-part scan on enemies close enough that box-tightness
+                -- is actually visible; farther enemies get the cheap 2-point
+                -- head/root approximation (the same math the far-fallback below
+                -- already used, just now the default instead of the exception).
+                -- Fixed distance, not user-exposed -- tune this one number if needed.
+                local BOX_PRECISION_DIST = 150
+                local myRootForBox = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local distForBox = myRootForBox and (myRootForBox.Position - root.Position).Magnitude or math.huge
+                local useTightBox = distForBox <= BOX_PRECISION_DIST
+
+                local onScr, bMinX, bMinY, bMaxX, bMaxY
+                if useTightBox then
+                    onScr, bMinX, bMinY, bMaxX, bMaxY = getCharBounds(char)
+                end
+                local topPos, botPos, w, h, topY
+                if useTightBox and onScr then
+                    w = bMaxX - bMinX
+                    h = bMaxY - bMinY
+                    topY  = bMinY
+                    topPos = {X = rootPos.X, Y = bMinY}
+                    botPos = {X = rootPos.X, Y = bMaxY}
+                else
+                    topPos = Camera:WorldToViewportPoint((head or root).Position + Vector3.new(0,0.5,0))
+                    botPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0,3,0))
+                    h = math.abs(botPos.Y - topPos.Y)
+                    w = h * 0.55
+                    topY = topPos.Y
+                end
+
+                -- Box (mit echten bounds)
+                if C.BoxESP then
+                    e.box.Position    = UDim2.fromOffset(rootPos.X, topY)
+                    e.box.Size        = UDim2.fromOffset(w, h)
+                    e.boxStroke.Color = color
+                    e.box.Visible     = true
+                else e.box.Visible = false end
+
+                -- Name (+ Team ID wenn TeamESP an)
+                if C.NameESP and head then
+                    local hp = Camera:WorldToViewportPoint(head.Position + Vector3.new(0,1.4,0))
+                    e.name.Position   = UDim2.fromOffset(hp.X, hp.Y)
+                    local nameStr = p.DisplayName
+                    if C.TeamESP and p.Team then
+                        nameStr = "Team #" .. getTeamId(p.Team) .. " | " .. nameStr
+                    end
+                    e.name.Text       = nameStr
+                    e.name.TextColor3 = color
+                    e.name.Visible    = true
+                else e.name.Visible = false end
+
+                -- Distance
+                if C.DistanceESP and LP.Character and LP.Character:FindFirstChild("HumanoidRootPart") then
+                    local d = (LP.Character.HumanoidRootPart.Position - root.Position).Magnitude
+                    e.dist.Position = UDim2.fromOffset(rootPos.X, botPos.Y + 2)
+                    e.dist.Text     = "[" .. math.floor(d) .. " m]"
+                    e.dist.Visible  = true
+                else e.dist.Visible = false end
+
+                -- Health bar
+                if C.HealthESP then
+                    local pct = math.clamp(hum.Health / math.max(hum.MaxHealth,1), 0, 1)
+                    e.hpBg.Position = UDim2.fromOffset(rootPos.X - w/2 - 6, topPos.Y)
+                    e.hpBg.Size     = UDim2.fromOffset(3, h)
+                    e.hpBg.Visible  = true
+                    e.hpFg.Size     = UDim2.new(1, 0, pct, 0)
+                    e.hpFg.BackgroundColor3 = Color3.fromRGB(math.floor(255*(1-pct)), math.floor(255*pct), 60)
+                else e.hpBg.Visible = false end
+                -- HP Text (Zahl)
+                if C.HealthTextESP then
+                    local pct = math.clamp(hum.Health / math.max(hum.MaxHealth,1), 0, 1)
+                    e.hpText.Position  = UDim2.fromOffset(rootPos.X - w/2 - 12, topPos.Y + h/2)
+                    e.hpText.Text      = tostring(math.floor(hum.Health))
+                    e.hpText.TextColor3= Color3.fromRGB(math.floor(255*(1-pct)), math.floor(255*pct), 60)
+                    e.hpText.Visible   = true
+                else e.hpText.Visible = false end
+
+                -- Tracer - origin selectable Bottom/Top/Center
+                local vpX, vpY = Camera.ViewportSize.X, Camera.ViewportSize.Y
+                local onScreen = rootPos.X > 0 and rootPos.X < vpX
+                             and rootPos.Y > 0 and rootPos.Y < vpY
+                -- Tracer - midpoint-based (center anchor), 100% accurate
+                local endPos = head and Camera:WorldToViewportPoint(head.Position)
+                local headOn = endPos and endPos.Z > 0
+                             and endPos.X > 0 and endPos.X < vpX
+                             and endPos.Y > 0 and endPos.Y < vpY
+                local myRoot = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                local dist = myRoot and (myRoot.Position - root.Position).Magnitude or 0
+                if C.TracerESP and headOn and dist < 800 then
+                    -- Origin
+                    local ox, oy = vpX/2, vpY  -- default Bottom
+                    if C.TracerOrigin == "Top"    then oy = 0    end
+                    if C.TracerOrigin == "Center" then oy = vpY/2 end
+                    -- Endpoint (Enemy Head auf'm Screen)
+                    local tx, ty = endPos.X, endPos.Y
+                    -- Midpoint + length + angle
+                    local dx, dy = tx - ox, ty - oy
+                    local len = math.sqrt(dx*dx + dy*dy)
+                    local midX, midY = (ox + tx) / 2, (oy + ty) / 2
+                    local ang = math.deg(math.atan2(dx, -dy))
+                    -- Center-anchor draw
+                    e.tracer.AnchorPoint    = Vector2.new(0.5, 0.5)
+                    e.tracer.Position       = UDim2.fromOffset(midX, midY)
+                    e.tracer.Size           = UDim2.fromOffset(1, len)
+                    e.tracer.Rotation       = ang
+                    e.tracer.BackgroundColor3       = C.TracerColor
+                    e.tracer.BackgroundTransparency = 0.15
+                    e.tracer.Visible        = true
+                else e.tracer.Visible = false end
+
+                -- Skeleton (auto-detect R6/R15)
+                if C.SkeletonESP then
+                    local bones = getBones(char)
+                    for i, pair in ipairs(bones) do
+                        local a = char:FindFirstChild(pair[1])
+                        local b = char:FindFirstChild(pair[2])
+                        local line = e.skeleton[i]
+                        if a and b then
+                            local ap = Camera:WorldToViewportPoint(a.Position)
+                            local bp = Camera:WorldToViewportPoint(b.Position)
+                            if ap.Z > 0 and bp.Z > 0 then
+                                local dx, dy = bp.X - ap.X, bp.Y - ap.Y
+                                local len = math.sqrt(dx*dx + dy*dy)
+                                -- MIDPOINT-ANCHOR: Line-Center exact zwischen A und B, um
+                                -- Center rotiert -> beide Endpoints landen exact auf A und B
+                                local midX = (ap.X + bp.X) * 0.5
+                                local midY = (ap.Y + bp.Y) * 0.5
+                                local ang  = math.deg(math.atan2(dx, dy))
+                                line.AnchorPoint      = Vector2.new(0.5, 0.5)
+                                line.Position         = UDim2.fromOffset(midX, midY)
+                                line.Size             = UDim2.fromOffset(2, len)
+                                line.Rotation         = ang
+                                line.BackgroundColor3 = color
+                                line.Visible          = true
+                            else line.Visible = false end
+                        else line.Visible = false end
+                    end
+                else
+                    for _, l in ipairs(e.skeleton) do l.Visible = false end
+                end
+            end
+        end
+    end
+end)
+
+-- =================================================
+--   MOVEMENT: Anti-Cheat-Safe (Infected Lands modus)
+--   - Micro-boost mit natural-looking jitter
+--   - Auto-pause frames damit sich nicht "roboterhaft" bewegt
+--   - Speed cap um detection threshold zu vermeiden
+--   Wrapped in do-end um local-register-limit zu schonen (Lua max 200 locals per function)
+-- =================================================
+do
+-- ========= DIRECT SPEED + JUMP mit reset protection (via PropertyChangedSignal, kein Heartbeat-Loop!) =========
+_G.ZQ_Jrgtuwbz = nil
+_G.ZQ_IbNbAwqZ = nil
+
+local function hookHumanoid(hum)
+    -- Speed protection: reagiert nur wenn WalkSpeed sich aendert (kein Loop)
+    hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+        if C.SpeedEnabled and hum.WalkSpeed ~= C.SpeedValue then
+            pcall(function() hum.WalkSpeed = C.SpeedValue end)
+        end
+    end)
+    -- Jump protection: nur bei aenderung
+    hum:GetPropertyChangedSignal("JumpPower"):Connect(function()
+        if C.JumpBoost and hum.JumpPower ~= C.JumpValue then
+            pcall(function() hum.JumpPower = C.JumpValue end)
+        end
+    end)
+end
+
+-- Nur beim Toggle-change setzen (kein per-frame spam)
+task.spawn(function()
+    local lastSpeed, lastJump = nil, nil
+    while true do
+        task.wait(0.3)
+        local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            if C.SpeedEnabled then
+                if hum.WalkSpeed ~= C.SpeedValue then
+                    pcall(function() hum.WalkSpeed = C.SpeedValue end)
+                end
+                lastSpeed = C.SpeedValue
+            elseif lastSpeed then
+                pcall(function() hum.WalkSpeed = 16 end)
+                lastSpeed = nil
+            end
+            if C.JumpBoost then
+                if hum.JumpPower ~= C.JumpValue then
+                    pcall(function() hum.JumpPower = C.JumpValue end)
+                end
+                lastJump = C.JumpValue
+            elseif lastJump then
+                pcall(function() hum.JumpPower = 50 end)
+                lastJump = nil
+            end
+        end
+    end
+end)
+
+if LP.Character then
+    local h = LP.Character:FindFirstChildOfClass("Humanoid")
+    if h then hookHumanoid(h) end
+end
+LP.CharacterAdded:Connect(function(char)
+    task.wait(0.3)
+    local h = char:WaitForChild("Humanoid", 5)
+    if h then hookHumanoid(h) end
+end)
+end  -- ende do-block (safe_speed_cap etc. sind jetzt frei)
+
+-- ========= ANTI-CHEAT HOOK ATTEMPTS =========
+-- Suche nach bekannten check-functions und hooke sie
+task.spawn(function()
+    task.wait(2)  -- warte bis alle game-scripts geladen
+    if not hookfunction then return end
+
+    -- Common check: Humanoid.WalkSpeed observer
+    local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function()
+            local oldSetProp = hookfunction(hum.SetAttribute, function(self, attr, val)
+                if attr and tostring(attr):lower():find("speed") then return end
+                return oldSetProp(self, attr, val)
+            end)
+        end)
+    end
+
+    -- Search + neutralize player Kick calls (blockt banns durch script-detection)
+    pcall(function()
+        local oldKick = hookfunction(LP.Kick, function(self, msg)
+            warn("[APP] Kick attempt blocked: " .. tostring(msg))
+            return
+        end)
+    end)
+
+    -- Anti-teleport-back DISABLED - hat user-initiated teleports (zu player etc.) auch reverted
+end)
+
+-- Jump boost = jetzt ueber hum.JumpPower direct (siehe oben), kein Velocity-Hack mehr
+-- (Velocity-Hack triggerte den AC → insta-kick)
+
+-- ========= FLY (Character selbst fliegt via BodyVelocity + BodyGyro) =========
+local flyBV, flyBG
+local function startFly()
+    local char = LP.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    if flyBV then flyBV:Destroy() end
+    if flyBG then flyBG:Destroy() end
+    flyBV = Instance.new("BodyVelocity", root)
+    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBV.Velocity = Vector3.new(0,0,0)
+    flyBG = Instance.new("BodyGyro", root)
+    flyBG.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+    flyBG.P = 1e4
+    flyBG.CFrame = Camera.CFrame
+end
+local function stopFly()
+    if flyBV then flyBV:Destroy(); flyBV = nil end
+    if flyBG then flyBG:Destroy(); flyBG = nil end
+end
+
+RunService.RenderStepped:Connect(function()
+    -- FLY HARD-DISABLED in AC-test version (triggert Infected Lands anti-cheat)
+    C.FlyEnabled = false
+    if flyBV then stopFly() end
+    if true then return end
+    if not flyBV then startFly() end
+    if not flyBV then return end
+    local dir = Vector3.new(0,0,0)
+    if UIS:IsKeyDown(Enum.KeyCode.W)           then dir = dir + Camera.CFrame.LookVector end
+    if UIS:IsKeyDown(Enum.KeyCode.S)           then dir = dir - Camera.CFrame.LookVector end
+    if UIS:IsKeyDown(Enum.KeyCode.A)           then dir = dir - Camera.CFrame.RightVector end
+    if UIS:IsKeyDown(Enum.KeyCode.D)           then dir = dir + Camera.CFrame.RightVector end
+    if UIS:IsKeyDown(Enum.KeyCode.Space)       then dir = dir + Vector3.new(0,1,0) end
+    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then dir = dir - Vector3.new(0,1,0) end
+    flyBV.Velocity = (dir.Magnitude > 0) and (dir.Unit * C.FlySpeed) or Vector3.new(0,0,0)
+    flyBG.CFrame = Camera.CFrame
+end)
+
+-- Clean up bei respawn
+LP.CharacterAdded:Connect(function() stopFly() end)
+
+-- Infinite Jump - direct Space detection (JumpRequest debouncet in Air)
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if C.InfJump and input.KeyCode == Enum.KeyCode.Space then
+        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+-- Bonus: hold Space auch continuously spam-jump
+task.spawn(function()
+    while true do
+        task.wait(0.15)
+        if C.InfJump and UIS:IsKeyDown(Enum.KeyCode.Space) then
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.Health > 0 then
+                hum:ChangeState(Enum.HumanoidStateType.Jumping)
+            end
+        end
+    end
+end)
+
+-- =================================================
+--   RAPID FIRE
+--   Spammt Left-Click solange LMB gedrueckt & Tool equipped
+-- =================================================
+local mouseButtonHeld = false
+UIS.InputBegan:Connect(function(i,gp) if not gp and i.UserInputType==Enum.UserInputType.MouseButton1 then mouseButtonHeld=true end end)
+UIS.InputEnded:Connect(function(i)   if i.UserInputType==Enum.UserInputType.MouseButton1 then mouseButtonHeld=false end end)
+
+local VIM = game:GetService("VirtualInputManager")
+
+task.spawn(function()
+    while true do
+        task.wait(C.FireRate / 1000)
+        if C.RapidFire and mouseButtonHeld then
+            local char = LP.Character
+            local tool = char and char:FindFirstChildOfClass("Tool")
+            if tool then
+                pcall(function() if mouse1click then mouse1click() end end)
+                pcall(function()
+                    VIM:SendMouseButtonEvent(0, 0, 0, true,  game, 0)
+                    VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+                end)
+                pcall(function() tool:Activate() end)
+            end
+        end
+    end
+end)
+
+-- =================================================
+--   MISC: Hitbox / Anti-AFK
+-- =================================================
+RunService.Heartbeat:Connect(function()
+    -- Hitbox Expander HARD-DISABLED (triggerte insta-ban in Infected Lands)
+    C.HitboxExpander = false
+    if true then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrp.Size         = Vector3.new(C.HitboxSize, C.HitboxSize, C.HitboxSize)
+                hrp.Transparency = 0.7
+                hrp.CanCollide   = false
+                hrp.Massless     = true
+            end
+        end
+    end
+end)
+
+LP.Idled:Connect(function()
+    if not C.AntiAFK then return end
+    VirtualUser:Button2Down(Vector2.new(0,0), Camera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0), Camera.CFrame)
+end)
+
+-- ========= ITEM ESP + VEHICLE ESP (Workspace scan) =========
+local itemCache = {}
+local function makeItemLabel()
+    local bb = New("BillboardGui", {Parent = ESPGui, Size = UDim2.fromOffset(120, 32),
+        AlwaysOnTop = true, LightInfluence = 0, Enabled = false})
+    local dot = New("Frame", {Parent = bb, Size = UDim2.fromOffset(6,6),
+        AnchorPoint = Vector2.new(0.5,0.5), Position = UDim2.fromScale(0.5,0.5),
+        BackgroundColor3 = Color3.fromRGB(255,220,80), BorderSizePixel = 0})
+    New("UICorner", {Parent = dot, CornerRadius = UDim.new(1,0)})
+    local lbl = New("TextLabel", {Parent = bb, BackgroundTransparency = 1,
+        AnchorPoint = Vector2.new(0.5,1), Position = UDim2.fromScale(0.5,0.4),
+        Size = UDim2.fromOffset(120,16), Font = Enum.Font.GothamBold, TextSize = 11,
+        Text = "", TextColor3 = Color3.fromRGB(255,220,80),
+        TextStrokeTransparency = 0})
+    local dist = New("TextLabel", {Parent = bb, BackgroundTransparency = 1,
+        AnchorPoint = Vector2.new(0.5,0), Position = UDim2.fromScale(0.5,0.6),
+        Size = UDim2.fromOffset(120,14), Font = Enum.Font.Gotham, TextSize = 10,
+        Text = "", TextColor3 = Color3.fromRGB(200,200,205),
+        TextStrokeTransparency = 0})
+    return {bb=bb, dot=dot, lbl=lbl, dist=dist}
+end
+
+-- Erkenne GUID/hash-artige namen und mach sie lesbar
+local function cleanName(rawName, obj)
+    if not rawName or rawName == "" then return "Item" end
+    local n = rawName
+    -- GUID-pattern: 8-4-4-4-12 hex, oder generell viele hyphens
+    local hyphens = 0
+    for _ in n:gmatch("-") do hyphens = hyphens + 1 end
+    -- Wenn > 2 hyphens ODER > 20 zeichen ohne leerzeichen -> wahrscheinlich hash
+    if hyphens >= 2 or (#n > 20 and not n:find(" ")) then
+        -- Versuche was besseres: ClassName oder parent name
+        if obj:IsA("Tool") then return "Weapon" end
+        if obj:IsA("Model") then
+            local lc = rawName:lower()
+            if lc:find("money") or lc:find("cash") or lc:find("dollar") then return "$ Money" end
+            if lc:find("coin") or lc:find("gold")  then return "Coin" end
+            if lc:find("gun")  or lc:find("rifle") or lc:find("pistol") then return "Gun" end
+            if lc:find("knife") then return "Knife" end
+            if lc:find("ammo") or lc:find("bullet") then return "Ammo" end
+            if lc:find("food") or lc:find("meat") or lc:find("bread") then return "Food" end
+            if lc:find("med")  or lc:find("heal") or lc:find("bandage") then return "Med" end
+            return "Item"
+        end
+        return "Item"
+    end
+    -- Kuerze extrem lange normale namen
+    if #n > 24 then n = n:sub(1, 22) .. ".." end
+    return n
+end
+
+-- BLACKLIST - vermeidet false positives (tree, rig, truck, environment stuff)
+local ITEM_BLACKLIST = {
+    "tree", "rig", "truck", "car", "vehicle", "leaf", "leaves", "grass",
+    "rock", "stone", "mountain", "hill", "wall", "floor", "roof", "door",
+    "window", "fence", "sign", "light", "lamp", "pole", "wire", "cable",
+    "medium", "small", "large", "big", "tiny", "spawn", "origin",
+    "handle", "hitbox", "collider", "invisible", "part", "base",
+    "playerrig", "characterrig", "npcrig",
+}
+local function isBlacklisted(n)
+    for _, bad in ipairs(ITEM_BLACKLIST) do
+        if n:find(bad) then return true end
+    end
+    return false
+end
+
+-- Kategorie-check: kehrt category zurueck oder nil
+local function matchCategory(n)
+    -- BOOKSHELF first - spezifischer als "shelf" allein
+    if n:find("bookshelf") or n:find("buecherregal") or n:find("buecherregal")
+    or n:find("library") or n:find("book_shelf") or n:find("bookrack") then
+        return "Bookshelf", "bookshelf"
+    end
+    -- SHELF / RACK - allgemeine regale
+    if n:find("^shelf") or n:find("_shelf") or n:find("^regal") or n:find("_regal")
+    or n:find("^rack") or n:find("_rack") or n:find("wallrack") or n:find("wall_rack") then
+        return "Shelf", "shelf"
+    end
+    -- CHEST (priority - damit "weapon_chest" oder "gun_locker" nicht als weapon matched)
+    if n:find("chest") or n:find("kiste") or n:find("crate") or n:find("locker")
+    or n:find("container") or n:find("storage") or n:find("stash") or n:find("safe") then
+        return "Chest", "chest"
+    end
+    if n:find("ammo") or n:find("_mag") or n:find("magazine") or n:find("bullet") or n:find("clip") then
+        return "Ammo", "ammo"
+    end
+    -- Food: strenge matches, keine subtring wie "water" (matched viel zu breit)
+    if n:find("^food") or n:find("_food") or n:find("meatpickup") or n:find("^bread")
+    or n:find("apple_pickup") or n:find("cannedfood") or n:find("canned_food")
+    or n:find("waterbottle") or n:find("^water_bottle") or n:find("mre") then
+        return "Food", "food"
+    end
+end
+
+-- Check ob object in player/character/body ist (equipped, NICHT pickup)
+local function isInPlayer(obj)
+    local p = obj.Parent
+    while p do
+        if p:IsA("Backpack") then return true end
+        if p:IsA("Model") and Players:GetPlayerFromCharacter(p) then return true end
+        if p:IsA("Model") and p:FindFirstChildOfClass("Humanoid") then return true end
+        -- Auch dead body models (ragdolls, corpses) - die haben oft kein Humanoid mehr
+        if p:IsA("Model") then
+            local pn = p.Name:lower()
+            if pn:find("body") or pn:find("dead") or pn:find("corpse") or pn:find("ragdoll")
+            or pn:find("zombie") or pn:find("npc") or pn:find("player") then
+                return true
+            end
+            -- Model mit head/torso = ist ein character body
+            if p:FindFirstChild("Head") or p:FindFirstChild("HumanoidRootPart")
+            or p:FindFirstChild("UpperTorso") or p:FindFirstChild("Torso") then
+                return true
+            end
+        end
+        p = p.Parent
+    end
+    return false
+end
+
+local function isPickupItem(obj)
+    -- Tools: nur show wenn NICHT in player/character/npc (sonst body-tagging bug)
+    if obj:IsA("Tool") then
+        if isInPlayer(obj) then return end
+        local n = obj.Name:lower()
+        if isBlacklisted(n) then return end
+        local h = obj:FindFirstChild("Handle")
+        if h then return cleanName(obj.Name, obj), h end
+        return
+    end
+    -- Models: check category + sub-toggle
+    if not obj:IsA("Model") then return end
+    -- Skip player character models
+    if Players:GetPlayerFromCharacter(obj) then return end
+    if obj:FindFirstChildOfClass("Humanoid") then return end  -- NPC body
+    local n = obj.Name:lower()
+    if isBlacklisted(n) then return end
+    local label, cat = matchCategory(n)
+    if not label then return end
+    -- Sub-toggle check
+    if cat == "ammo"     and not C.ItemESP_Ammo     then return end
+    if cat == "food"     and not C.ItemESP_Food     then return end
+    if cat == "chest"     and not C.ItemESP_Chest     then return end
+    if cat == "bookshelf" and not C.ItemESP_Bookshelf then return end
+    if cat == "shelf"     and not C.ItemESP_Shelf     then return end
+    local part = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart")
+    if part then return label, part end
+end
+local function isVehicle(obj)
+    if not obj:IsA("Model") then return end
+    local seat = obj:FindFirstChildWhichIsA("VehicleSeat", true)
+    if seat then return obj.Name, seat end
+end
+
+task.spawn(function()
+    while task.wait(2) do  -- FIX: scan alle 2s statt 0.5s (kein lag-spike mehr)
+        if C.ItemESP or C.VehicleESP then
+            local myPos = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                          and LP.Character.HumanoidRootPart.Position or Vector3.new()
+            local seen = {}
+            local descendants = Workspace:GetDescendants()
+            -- Batch-processing: yield alle 500 objects damit's die frame nicht freezet
+            for i, obj in ipairs(descendants) do
+                if i % 500 == 0 then task.wait() end  -- gib der engine luft
+                local name, part, isVeh
+                if C.ItemESP then name, part = isPickupItem(obj) end
+                if not name and C.VehicleESP then
+                    name, part = isVehicle(obj); isVeh = part ~= nil
+                end
+                if name and part then
+                    -- User-adjustable distance filter
+                    local d = (myPos - part.Position).Magnitude
+                    if d > (C.ItemESP_MaxDistance or 500) then continue end
+                    seen[obj] = true
+                    local ent = itemCache[obj] or makeItemLabel()
+                    itemCache[obj] = ent
+                    ent.bb.Adornee = part
+                    ent.bb.Enabled = true
+                    if isVeh then
+                        ent.lbl.Text = name
+                        ent.dot.BackgroundColor3 = Color3.fromRGB(80,180,255)
+                        ent.lbl.TextColor3 = Color3.fromRGB(80,180,255)
+                        ent.dist.Text = "[" .. (part.Occupant and "OCCUPIED" or "EMPTY") .. "] "
+                                      .. math.floor((myPos - part.Position).Magnitude) .. "m"
+                    else
+                        ent.lbl.Text = name
+                        ent.dot.BackgroundColor3 = Color3.fromRGB(255,220,80)
+                        ent.lbl.TextColor3 = Color3.fromRGB(255,220,80)
+                        ent.dist.Text = "[" .. math.floor((myPos - part.Position).Magnitude) .. "m]"
+                    end
+                end
+            end
+            -- cleanup vergangene
+            for obj, ent in pairs(itemCache) do
+                if not seen[obj] or not obj.Parent then
+                    ent.bb:Destroy()
+                    itemCache[obj] = nil
+                end
+            end
+        else
+            for obj, ent in pairs(itemCache) do ent.bb.Enabled = false end
+        end
+    end
+end)
+
+-- ========= CHAMS MATERIAL (client-side visual on enemy parts) =========
+local matEnum = {
+    Normal     = Enum.Material.Plastic,
+    Neon       = Enum.Material.Neon,
+    Glass      = Enum.Material.Glass,
+    ForceField = Enum.Material.ForceField,
+    Wood       = Enum.Material.WoodPlanks,
+    Plastic    = Enum.Material.SmoothPlastic,
+}
+task.spawn(function()
+    while task.wait(0.3) do
+        if C.ChamsMaterial and C.ChamsMaterial ~= "Normal" then
+            local mat = matEnum[C.ChamsMaterial] or Enum.Material.Plastic
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= LP and p.Character then
+                    for _, part in ipairs(p.Character:GetDescendants()) do
+                        if part:IsA("BasePart") and part.Material ~= mat then
+                            pcall(function() part.Material = mat end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ========= BULLET TRACERS (universal - LMB + Camera raycast) =========
+local function drawBulletBeam(from, to)
+    task.spawn(function()
+        local dist = (from - to).Magnitude
+        if dist < 0.5 then return end
+        local mid = (from + to) / 2
+        local beam = Instance.new("Part")
+        beam.Anchored = true; beam.CanCollide = false; beam.CanQuery = false; beam.Massless = true
+        beam.Size = Vector3.new(0.15, 0.15, dist)
+        beam.CFrame = CFrame.new(mid, to)
+        beam.Material = Enum.Material.Neon
+        beam.Color = C.BulletColor
+        beam.Transparency = 0
+        beam.Parent = Workspace
+        for i = 1, 25 do
+            beam.Transparency = i / 25
+            beam.Color = C.BulletColor
+            task.wait(0.02)
+        end
+        beam:Destroy()
+    end)
+end
+
+-- Method 1: Da Hood ShootGun hook
+if hookmetamethod and getnamecallmethod and checkcaller then
+    local oldNCBullet
+    oldNCBullet = hookmetamethod(game, "__namecall", function(self, ...)
+        if not checkcaller() and C.BulletTracers
+           and getnamecallmethod() == "FireServer"
+           and self.Name == "MainEvent" then
+            local args = {...}
+            if args[1] == "ShootGun" and typeof(args[3])=="Vector3" and typeof(args[4])=="Vector3" then
+                drawBulletBeam(args[3], args[4])
+            end
+        end
+        return oldNCBullet(self, ...)
+    end)
+end
+
+-- Method 2: LMB Camera-Raycast (universal fallback)
+local lastBulletTime = 0
+UIS.InputBegan:Connect(function(input, _gp)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and C.BulletTracers then
+        if tick() - lastBulletTime < 0.08 then return end
+        local char = LP.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        -- GATE: nur wenn eine Waffe (Tool oder equipped Handle) da ist
+        local hasWeapon = char:FindFirstChildWhichIsA("Tool") ~= nil
+        if not hasWeapon then
+            for _, c in ipairs(char:GetChildren()) do
+                if c:IsA("Model") or c.Name == "Handle" or c:FindFirstChild("Handle") then
+                    hasWeapon = true; break
+                end
+            end
+        end
+        if not hasWeapon then return end
+        lastBulletTime = tick()
+        -- Ray from camera
+        local origin = Camera.CFrame.Position
+        local dir = Camera.CFrame.LookVector * 500
+        local rp = RaycastParams.new()
+        rp.FilterDescendantsInstances = {char, Camera}
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = Workspace:Raycast(origin, dir, rp)
+        local endPoint = hit and hit.Position or (origin + dir)
+        -- Beam from character position to hit
+        drawBulletBeam(hrp.Position, endPoint)
+    end
+end)
+
+-- ========= NO FALL DAMAGE v3 - HealthChanged hook + Teleport + Anchor =========
+local nfdPreHP = nil
+local nfdWasInAir = false
+local nfdRecentAir = 0  -- timestamp of last time we were in air
+
+local function setupNFD(char)
+    local hum = char:WaitForChild("Humanoid", 5)
+    if not hum then return end
+    -- SOFORTIGER HealthChanged hook - restored jeden Damage waehrend/nach Fall
+    hum.HealthChanged:Connect(function(newHP)
+        if not C.NoFallDamage then return end
+        if nfdPreHP and newHP < nfdPreHP then
+            -- Wenn wir in air waren oder innerhalb der letzten 500ms -> restore
+            if nfdWasInAir or (tick() - nfdRecentAir) < 0.5 then
+                pcall(function() hum.Health = nfdPreHP end)
+            end
+        end
+    end)
+end
+if LP.Character then setupNFD(LP.Character) end
+LP.CharacterAdded:Connect(setupNFD)
+
+RunService.Heartbeat:Connect(function()
+    if not C.NoFallDamage then nfdWasInAir = false; return end
+    local char = LP.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not root or hum.Health <= 0 then return end
+
+    local yVel = root.AssemblyLinearVelocity.Y
+    local isInAir = yVel < -3 or yVel > 3
+                 or hum:GetState() == Enum.HumanoidStateType.Freefall
+
+    if isInAir then nfdRecentAir = tick() end
+
+    if isInAir and not nfdWasInAir then
+        nfdPreHP = hum.Health  -- HP am Start des Falls
+    end
+
+    -- TELEPORT-Trick: bei extremem Fall, halte Y-Position hoch (kein Fall ueber 20 studs auf einmal)
+    if yVel < -50 then
+        local rp = RaycastParams.new()
+        rp.FilterDescendantsInstances = {char}
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = Workspace:Raycast(root.Position, Vector3.new(0, -1000, 0), rp)
+        if hit then
+            local heightAboveGround = root.Position.Y - hit.Position.Y
+            if heightAboveGround > 20 then
+                -- Teleport character down to just 15 studs above ground + reset velocity
+                root.CFrame = CFrame.new(root.Position.X, hit.Position.Y + 15, root.Position.Z)
+                            * (root.CFrame - root.CFrame.Position)
+                root.AssemblyLinearVelocity = Vector3.new(
+                    root.AssemblyLinearVelocity.X, -20, root.AssemblyLinearVelocity.Z)
+            end
+        end
+    end
+
+    -- Anchor kurz vor Landung
+    if yVel < -20 then
+        local rp = RaycastParams.new()
+        rp.FilterDescendantsInstances = {char}
+        rp.FilterType = Enum.RaycastFilterType.Exclude
+        local hit = Workspace:Raycast(root.Position, Vector3.new(0, -6, 0), rp)
+        if hit then
+            root.AssemblyLinearVelocity = Vector3.new(
+                root.AssemblyLinearVelocity.X, 0, root.AssemblyLinearVelocity.Z)
+            root.Anchored = true
+            task.delay(0.12, function()
+                if root and root.Parent then root.Anchored = false end
+            end)
+        end
+    end
+
+    if not isInAir then nfdPreHP = nil end
+    nfdWasInAir = isInAir
+end)
+
+-- Noclip - jede Frame CanCollide=false auf alle Character-Parts
+RunService.Stepped:Connect(function()
+    if not C.Noclip then return end
+    local char = LP.Character
+    if not char then return end
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            part.CanCollide = false
+        end
+    end
+end)
+
+-- ========= FREECAM v2 (mit MouseBehavior + proper restore + Keybind) =========
+local freecamCF, freecamYaw, freecamPitch
+local prevCamType, prevMouseBehav, prevMouseIcon
+
+local CAS = game:GetService("ContextActionService")
+
+-- Enter Freecam mode: save originals + block character movement
+local function enterFreecam()
+    freecamCF    = Camera.CFrame
+    local look = Camera.CFrame.LookVector
+    freecamYaw   = math.atan2(-look.X, -look.Z)
+    freecamPitch = math.asin(math.clamp(look.Y, -1, 1))
+    prevCamType    = Camera.CameraType
+    prevMouseBehav = UIS.MouseBehavior
+    prevMouseIcon  = UIS.MouseIconEnabled
+    Camera.CameraType    = Enum.CameraType.Scriptable
+    UIS.MouseBehavior    = Enum.MouseBehavior.LockCenter
+    UIS.MouseIconEnabled = false
+    -- Block character WASD + Jump so nur die Camera reagiert
+    CAS:BindActionAtPriority("FreecamBlockMove",
+        function() return Enum.ContextActionResult.Sink end, false,
+        Enum.ContextActionPriority.High.Value,
+        Enum.PlayerActions.CharacterForward,
+        Enum.PlayerActions.CharacterBackward,
+        Enum.PlayerActions.CharacterLeft,
+        Enum.PlayerActions.CharacterRight,
+        Enum.PlayerActions.CharacterJump)
+end
+
+-- Exit Freecam: fully restore
+local function exitFreecam()
+    freecamCF, freecamYaw, freecamPitch = nil, nil, nil
+    -- Character-Movement wieder erlauben
+    pcall(function() CAS:UnbindAction("FreecamBlockMove") end)
+    local char = LP.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    -- FORCE Custom camera + character subject (nie auf Scriptable belassen)
+    pcall(function()
+        Camera.CameraType    = Enum.CameraType.Custom
+        if hum then Camera.CameraSubject = hum end
+        UIS.MouseBehavior    = Enum.MouseBehavior.Default
+        UIS.MouseIconEnabled = true
+    end)
+end
+
+-- Global Keybind listener (Freecam + Fly) - skip wenn Unknown = kein bind
+UIS.InputBegan:Connect(function(input, _gp)
+    if pickingKeybind then return end
+    if input.KeyCode == Enum.KeyCode.Unknown then return end
+    if input.KeyCode == C.FreecamKey and C.FreecamKey ~= Enum.KeyCode.Unknown then
+        C.Freecam = not C.Freecam
+    elseif input.KeyCode == C.FlyKey and C.FlyKey ~= Enum.KeyCode.Unknown then
+        C.FlyEnabled = not C.FlyEnabled
+    end
+end)
+
+-- Main freecam update loop (mouse delta via GetMouseDelta - universal)
+RunService.RenderStepped:Connect(function(dt)
+    if C.Freecam then
+        if not freecamCF then enterFreecam() end
+        -- Camera + Mouse enforce falls game sie zurueckreisst
+        if Camera.CameraType ~= Enum.CameraType.Scriptable then
+            Camera.CameraType = Enum.CameraType.Scriptable
+        end
+        if UIS.MouseBehavior ~= Enum.MouseBehavior.LockCenter then
+            UIS.MouseBehavior = Enum.MouseBehavior.LockCenter
+        end
+        -- Raw mouse delta (bypasses InputChanged handling)
+        local delta = UIS:GetMouseDelta()
+        if delta.X ~= 0 or delta.Y ~= 0 then
+            freecamYaw   = freecamYaw - delta.X * 0.005
+            freecamPitch = math.clamp(freecamPitch - delta.Y * 0.005,
+                                       -math.pi/2 + 0.05, math.pi/2 - 0.05)
+        end
+        -- Movement
+        local mv = Vector3.new(0,0,0)
+        if UIS:IsKeyDown(Enum.KeyCode.W)           then mv = mv + Vector3.new(0,0,-1) end
+        if UIS:IsKeyDown(Enum.KeyCode.S)           then mv = mv + Vector3.new(0,0, 1) end
+        if UIS:IsKeyDown(Enum.KeyCode.A)           then mv = mv + Vector3.new(-1,0,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.D)           then mv = mv + Vector3.new( 1,0,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.E)           then mv = mv + Vector3.new(0, 1,0) end
+        if UIS:IsKeyDown(Enum.KeyCode.Q)           then mv = mv + Vector3.new(0,-1,0) end
+        local speed = C.FreecamSpeed
+        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then speed = speed * 2.5 end
+        local rot = CFrame.Angles(0, freecamYaw, 0) * CFrame.Angles(freecamPitch, 0, 0)
+        local pos = freecamCF.Position + rot:VectorToWorldSpace(mv) * speed * dt
+        freecamCF = CFrame.new(pos) * rot
+        Camera.CFrame = freecamCF
+    else
+        if freecamCF then exitFreecam() end
+    end
+end)
+
+-- =================================================
+--   LAUNCH ANIMATION (Black + Neon White)
+-- =================================================
+task.spawn(function()
+    -- Menu erst versteckt bis Animation fertig
+    local wasVisible = Main.Visible
+    Main.Visible = false
+
+    -- Vollbild-Loader-Overlay (schwarz, ueber allem)
+    local Loader = New("ScreenGui", {Name="xIkmYtvV", Parent=GuiParent,
+        ResetOnSpawn=false, IgnoreGuiInset=true, DisplayOrder=2000,
+        ZIndexBehavior=Enum.ZIndexBehavior.Sibling})
+
+    -- Fullscreen schwarze Flaeche
+    local bg = New("Frame", {Parent=Loader, Size=UDim2.fromScale(1,1),
+        BackgroundColor3=Color3.fromRGB(0,0,0), BorderSizePixel=0,
+        BackgroundTransparency=1})  -- startet transparent, faded rein
+
+    -- Zentrales Container-Frame
+    local center = New("Frame", {Parent=bg, AnchorPoint=Vector2.new(0.5,0.5),
+        Position=UDim2.fromScale(0.5,0.5), Size=UDim2.fromOffset(500,180),
+        BackgroundTransparency=1})
+
+    -- Grosses ENI Logo (neon weiss glow)
+    local logo = New("TextLabel", {Parent=center, BackgroundTransparency=1,
+        Position=UDim2.fromScale(0.5,0), AnchorPoint=Vector2.new(0.5,0),
+        Size=UDim2.fromOffset(500,80),
+        Font=Enum.Font.GothamBlack, TextSize=1,  -- startet 1, wird animiert
+        Text="APP", TextColor3=Color3.fromRGB(255,255,255),
+        TextTransparency=1})
+    -- Text-Stroke fuer neon-Effekt
+    New("UIStroke", {Parent=logo, Color=Color3.fromRGB(255,255,255),
+        Thickness=2, Transparency=0.7})
+
+    -- Subtitle
+    local sub = New("TextLabel", {Parent=center, BackgroundTransparency=1,
+        Position=UDim2.fromOffset(0,88), Size=UDim2.new(1,0,0,20),
+        Font=Enum.Font.Code, TextSize=12, Text="INITIALIZING...",
+        TextColor3=Color3.fromRGB(180,180,190), TextTransparency=1,
+        TextXAlignment=Enum.TextXAlignment.Center})
+
+    -- Loading Bar Container
+    local barBg = New("Frame", {Parent=center, AnchorPoint=Vector2.new(0.5,0),
+        Position=UDim2.new(0.5,0,0,120), Size=UDim2.fromOffset(320,2),
+        BackgroundColor3=Color3.fromRGB(40,40,50), BorderSizePixel=0,
+        BackgroundTransparency=1})
+    local barFill = New("Frame", {Parent=barBg, Size=UDim2.fromScale(0,1),
+        BackgroundColor3=Color3.fromRGB(255,255,255), BorderSizePixel=0})
+    -- Neon-glow unter der bar
+    local barGlow = New("Frame", {Parent=center, AnchorPoint=Vector2.new(0.5,0),
+        Position=UDim2.new(0.5,0,0,118), Size=UDim2.fromOffset(320,8),
+        BackgroundColor3=Color3.fromRGB(255,255,255), BorderSizePixel=0,
+        BackgroundTransparency=1})
+    New("UIGradient", {Parent=barGlow, Rotation=90, Transparency=NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 0.6),
+        NumberSequenceKeypoint.new(1, 1),
+    }})
+
+    -- Percent-Label
+    local pct = New("TextLabel", {Parent=center, AnchorPoint=Vector2.new(0.5,0),
+        Position=UDim2.new(0.5,0,0,132), Size=UDim2.fromOffset(320,20),
+        Font=Enum.Font.Code, TextSize=10, Text="0%",
+        TextColor3=Color3.fromRGB(140,140,160), TextTransparency=1,
+        TextXAlignment=Enum.TextXAlignment.Right})
+
+    -- Horizontale Scanline die von oben nach unten sweept
+    local scan = New("Frame", {Parent=bg, Size=UDim2.new(1,0,0,2),
+        Position=UDim2.new(0,0,0,-4), BackgroundColor3=Color3.fromRGB(255,255,255),
+        BorderSizePixel=0, BackgroundTransparency=0.4})
+    New("UIGradient", {Parent=scan, Transparency=NumberSequence.new{
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.5, 0.2),
+        NumberSequenceKeypoint.new(1, 1),
+    }})
+
+    -- ===== TIMELINE =====
+    -- 1) Fade schwarzer bg rein (0.3s)
+    Tween(bg, 0.3, {BackgroundTransparency = 0})
+    task.wait(0.3)
+
+    -- 2) Logo Text explodiert von 1 -> 56, gleichzeitig fade in
+    logo.TextSize = 1
+    Tween(logo, 0.6, {TextSize = 56, TextTransparency = 0}, Enum.EasingStyle.Back)
+    Tween(sub,  0.6, {TextTransparency = 0})
+    Tween(barBg, 0.4, {BackgroundTransparency = 0})
+    Tween(pct,   0.6, {TextTransparency = 0})
+    task.wait(0.6)
+
+    -- 3) Scanline sweept 3 durch den screen (parallel zu load bar)
+    task.spawn(function()
+        for i = 1, 3 do
+            scan.Position = UDim2.new(0,0,0,-4)
+            Tween(scan, 0.7, {Position = UDim2.new(0,0,1,4)}, Enum.EasingStyle.Linear)
+            task.wait(0.75)
+        end
+        scan:Destroy()
+    end)
+
+    -- 4) Loading bar fuellt 0->100 mit percent tick + wechselnde subtitle msgs
+    local msgs = {
+        {0,   "INITIALIZING..."},
+        {20,  "LOADING MODULES..."},
+        {45,  "HOOKING RENDER..."},
+        {70,  "ATTACHING ESP..."},
+        {90,  "BYPASSING CHECKS..."},
+        {100, "ATTACHED."},
+    }
+    local msgIdx = 1
+    for p = 0, 100, 2 do
+        barFill.Size    = UDim2.fromScale(p/100, 1)
+        barGlow.Size    = UDim2.fromOffset(320 * (p/100), 8)
+        barGlow.Position= UDim2.new(0.5, -160 + (160 * (p/100)), 0, 118)
+        barGlow.BackgroundTransparency = 0.4
+        pct.Text        = tostring(p) .. "%"
+        -- Subtitle wechseln
+        if msgs[msgIdx+1] and p >= msgs[msgIdx+1][1] then
+            msgIdx = msgIdx + 1
+            sub.Text = msgs[msgIdx][2]
+        end
+        task.wait(0.025)
+    end
+
+    task.wait(0.4)
+
+    -- 5) Alles fade-out + Loader wegblenden
+    Tween(logo, 0.4, {TextTransparency = 1, TextSize = 68})
+    Tween(sub,  0.3, {TextTransparency = 1})
+    Tween(barBg,0.3, {BackgroundTransparency = 1})
+    Tween(barFill, 0.3, {BackgroundTransparency = 1})
+    Tween(barGlow,0.3, {BackgroundTransparency = 1})
+    Tween(pct,  0.3, {TextTransparency = 1})
+    task.wait(0.4)
+    Tween(bg,   0.5, {BackgroundTransparency = 1})
+    task.wait(0.5)
+    Loader:Destroy()
+
+    -- 6) Main slice-in animation (klein -> normal, mit fade)
+    Main.Visible = wasVisible
+    local finalSize = Main.Size
+    local finalPos  = Main.Position
+    Main.Size = UDim2.fromOffset(700, 0)
+    Main.Position = UDim2.new(0.5, -350, 0.5, 0)
+    Tween(Main, 0.35, {Size = finalSize, Position = finalPos}, Enum.EasingStyle.Quart)
+end)
+
+print("[APP - ANTI CHEAT TEST] loaded")
