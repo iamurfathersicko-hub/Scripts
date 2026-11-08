@@ -73,8 +73,6 @@ local C = {
     DistanceESP    = true,
     ESP_MaxDistance = 5000,  -- max studs fuer player ESP
     ESP_Unlimited   = false, -- bypasst distance-limit komplett
-    ESP_BoxPrecisionDist = 150,  -- studs; tight per-part box bounds only inside this range,
-                                  -- cheap 2-point approx beyond it (perf, scales with player count)
     TracerESP      = false,
     TracerOrigin   = "Bottom",  -- Bottom / Top / Center
     SkeletonESP    = false,
@@ -262,33 +260,30 @@ local Gui = New("ScreenGui", {Name="tfBfqVxp", Parent=GuiParent, ResetOnSpawn=fa
 local BG_LOCK      = Color3.fromRGB(0, 0, 0)     -- Main / Top / Side / StatusBar
 local BG_LOCK_ROW  = Color3.fromRGB(10, 10, 12)  -- Toggle/Slider/Colorpicker rows (minimal heller fuer Kontrast)
 
--- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut, jeden Frame
--- Nur AccentTarget-Elemente (Streifen, Glows, Slider-Fill, Section-Bars) duerfen Farbe haben
-task.spawn(function()
-    while true do
-        task.wait(0.1)  -- 10x pro Sekunde, kein spuerbarer perf hit
-        if not Gui or not Gui.Parent then break end
-        for _, obj in ipairs(Gui:GetDescendants()) do
-            if obj:IsA("GuiObject") then
-                local accent = obj:GetAttribute("AccentTarget")
-                local locked = obj:GetAttribute("BgLocked")
-                if locked then
-                    pcall(function() obj.BackgroundColor3 = BG_LOCK end)
-                elseif not accent then
-                    -- Kein AccentTarget -> Background darf NIE eine kraeftige Farbe kriegen
-                    -- Nur rows die BG_LOCK_ROW haben sollen behalten das
-                    local cur = obj.BackgroundColor3
-                    -- Wenn's ein row-artiges dark element ist, lock auf BG_LOCK_ROW
-                    if cur == Color3.fromRGB(14,14,18)
-                    or cur == Color3.fromRGB(22,22,28)
-                    or cur == Color3.fromRGB(14,14,20) then
-                        pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
-                    end
-                end
-            end
+-- Watchdog: erzwingt schwarz auf JEDEN Frame ohne AccentTarget-Attribut.
+-- Was a 10x/sec poll over Gui:GetDescendants() -- a full recursive re-walk of every
+-- menu element, forever, for the script's whole lifetime (real cost on a ~2500-line
+-- UI tree). Replaced with the same enforcement run once per object via
+-- DescendantAdded (catches everything built after this point, which is everything --
+-- Main and the rest of the menu are created below this) instead of re-scanning the
+-- whole tree on a timer.
+local function enforceBgLock(obj)
+    if not obj:IsA("GuiObject") then return end
+    local accent = obj:GetAttribute("AccentTarget")
+    local locked = obj:GetAttribute("BgLocked")
+    if locked then
+        pcall(function() obj.BackgroundColor3 = BG_LOCK end)
+    elseif not accent then
+        local cur = obj.BackgroundColor3
+        if cur == Color3.fromRGB(14,14,18)
+        or cur == Color3.fromRGB(22,22,28)
+        or cur == Color3.fromRGB(14,14,20) then
+            pcall(function() obj.BackgroundColor3 = BG_LOCK_ROW end)
         end
     end
-end)
+end
+for _, obj in ipairs(Gui:GetDescendants()) do enforceBgLock(obj) end
+Gui.DescendantAdded:Connect(enforceBgLock)
 
 local Main = New("Frame", {
     Parent = Gui, Size = UDim2.fromOffset(700, 550),
@@ -885,7 +880,6 @@ Toggle(pVis, "Health ESP", "HealthESP")
 Toggle(pVis, "HP Text (87/100)", "HealthTextESP")
 Toggle(pVis, "Distance ESP", "DistanceESP")
 Slider(pVis, "ESP Max Distance (players)", "ESP_MaxDistance", 50, 5000, 50)
-Slider(pVis, "Box Precision Range (perf)", "ESP_BoxPrecisionDist", 0, 1000, 25)
 Toggle(pVis, "ESP Unlimited Distance", "ESP_Unlimited")
 Toggle(pVis, "Tracer Lines", "TracerESP")
 -- Tracer Origin Cycle
@@ -3454,6 +3448,28 @@ end)
 -- =================================================
 local Cache = {}
 
+-- Perf: Name ESP + TeamESP was calling game:GetService("Teams"):GetTeams() and
+-- looping it fresh for EVERY visible enemy, EVERY frame, just to look up a team
+-- number. Teams practically never change mid-round, so cache the list and only
+-- refresh it periodically instead of re-fetching per-player per-frame.
+local teamListCache = {}
+local function refreshTeamCache()
+    teamListCache = game:GetService("Teams"):GetTeams()
+end
+refreshTeamCache()
+task.spawn(function()
+    while true do
+        task.wait(5)
+        refreshTeamCache()
+    end
+end)
+local function getTeamId(team)
+    for i, t in ipairs(teamListCache) do
+        if t == team then return i end
+    end
+    return 0
+end
+
 -- R15 skeleton bone pairs (fallback zu R6 falls parts fehlen)
 local BONES_R15 = {
     {"Head","UpperTorso"}, {"UpperTorso","LowerTorso"},
@@ -4045,9 +4061,18 @@ RunService.RenderStepped:Connect(function()
                 e.tt.Enabled = false
                 if e.ttText then e.ttText.Visible = false end
             end
-            if rootPos.Z <= 0 or outOfRange then
+            -- Perf: Name/Distance/Health ESP all reuse the same bounds setup that
+            -- Box ESP needs (they're not independent -- Distance/Health position
+            -- themselves off the box's computed top/bottom). That setup block was
+            -- running for every on-screen enemy every frame even when NONE of these
+            -- toggles were on -- e.g. turning on only Name ESP still paid for the
+            -- full box-bounds projection work. Skip the whole block when nothing
+            -- that needs it is actually enabled.
+            local anyEspFeatureOn = C.BoxESP or C.NameESP or C.DistanceESP or C.HealthESP or C.HealthTextESP
+            if rootPos.Z <= 0 or outOfRange or not anyEspFeatureOn then
                 e.box.Visible, e.name.Visible, e.dist.Visible = false, false, false
                 e.hpBg.Visible, e.tracer.Visible = false, false
+                if e.hpText then e.hpText.Visible = false end
                 for _, l in ipairs(e.skeleton) do l.Visible = false end
             else
                 -- Perf: getCharBounds does 8x WorldToViewportPoint calls PER PART (every
@@ -4058,9 +4083,11 @@ RunService.RenderStepped:Connect(function()
                 -- is actually visible; farther enemies get the cheap 2-point
                 -- head/root approximation (the same math the far-fallback below
                 -- already used, just now the default instead of the exception).
+                -- Fixed distance, not user-exposed -- tune this one number if needed.
+                local BOX_PRECISION_DIST = 150
                 local myRootForBox = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
                 local distForBox = myRootForBox and (myRootForBox.Position - root.Position).Magnitude or math.huge
-                local useTightBox = distForBox <= (C.ESP_BoxPrecisionDist or 150)
+                local useTightBox = distForBox <= BOX_PRECISION_DIST
 
                 local onScr, bMinX, bMinY, bMaxX, bMaxY
                 if useTightBox then
@@ -4095,10 +4122,7 @@ RunService.RenderStepped:Connect(function()
                     e.name.Position   = UDim2.fromOffset(hp.X, hp.Y)
                     local nameStr = p.DisplayName
                     if C.TeamESP and p.Team then
-                        local teams = game:GetService("Teams"):GetTeams()
-                        local id = 0
-                        for i, t in ipairs(teams) do if t == p.Team then id = i break end end
-                        nameStr = "Team #" .. id .. " | " .. nameStr
+                        nameStr = "Team #" .. getTeamId(p.Team) .. " | " .. nameStr
                     end
                     e.name.Text       = nameStr
                     e.name.TextColor3 = color
